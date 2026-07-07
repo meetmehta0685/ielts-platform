@@ -9,7 +9,7 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans);
   --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
+  --font-heading: var(--font-heading);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -49,38 +49,38 @@
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --background: oklch(0.985 0.005 60); /* warm cream/stone background (#faf8f5) */
+  --foreground: oklch(0.15 0.015 60);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.15 0.015 60);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.15 0.015 60);
+  --primary: oklch(0.25 0.115 260); /* warm navy (#1e3a8a) */
+  --primary-foreground: oklch(0.99 0.005 60);
+  --secondary: oklch(0.96 0.03 80); /* warm cream gold (#faf2e2) */
+  --secondary-foreground: oklch(0.25 0.08 80);
+  --muted: oklch(0.95 0.01 60);
+  --muted-foreground: oklch(0.45 0.02 60);
+  --accent: oklch(0.70 0.19 80); /* muted amber/gold (#f59e0b) */
+  --accent-foreground: oklch(0.15 0.015 60);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --border: oklch(0.94 0.01 70); /* soft sandy grey border (#efebe4) */
+  --input: oklch(0.94 0.01 70);
+  --ring: oklch(0.25 0.115 260);
+  --chart-1: oklch(0.25 0.115 260);
+  --chart-2: oklch(0.70 0.19 80);
+  --chart-3: oklch(0.85 0.05 80);
+  --chart-4: oklch(0.4 0.1 80);
+  --chart-5: oklch(0.3 0.1 80);
+  --radius: 1.0rem;
+  --sidebar: oklch(0.985 0.005 60);
+  --sidebar-foreground: oklch(0.15 0.015 60);
+  --sidebar-primary: oklch(0.25 0.115 260);
+  --sidebar-primary-foreground: oklch(0.99 0.005 60);
+  --sidebar-accent: oklch(0.96 0.03 80);
+  --sidebar-accent-foreground: oklch(0.25 0.08 80);
+  --sidebar-border: oklch(0.94 0.01 70);
+  --sidebar-ring: oklch(0.25 0.115 260);
 }
 
 .dark {
@@ -127,4 +127,115 @@
   html {
     @apply font-sans;
   }
+}
+
+@keyframes messageAppear {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-message-appear {
+  animation: messageAppear 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes heroFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  33% {
+    transform: translate(12px, -18px) scale(1.03);
+  }
+  66% {
+    transform: translate(-8px, -10px) scale(0.98);
+  }
+}
+
+@keyframes float-reverse {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  33% {
+    transform: translate(-14px, 16px) scale(1.02);
+  }
+  66% {
+    transform: translate(10px, 8px) scale(0.97);
+  }
+}
+
+@keyframes float-slow {
+  0%, 100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(-16px, -24px);
+  }
+}
+
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% center;
+  }
+  100% {
+    background-position: 200% center;
+  }
+}
+
+.animate-hero-fade-up {
+  animation: heroFadeUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  opacity: 0;
+}
+
+.animate-float {
+  animation: float 12s ease-in-out infinite;
+}
+
+.animate-float-delayed {
+  animation: float 14s ease-in-out 2s infinite;
+}
+
+.animate-float-reverse {
+  animation: float-reverse 16s ease-in-out 1s infinite;
+}
+
+.animate-float-slow {
+  animation: float-slow 18s ease-in-out 3s infinite;
+}
+
+.animate-marquee {
+  animation: marquee 28s linear infinite;
+}
+
+.animate-shimmer {
+  background-size: 200% auto;
+  animation: shimmer 3s linear infinite;
+}
+
+.font-heading {
+  font-family: var(--font-heading), Georgia, "Times New Roman", serif;
 }

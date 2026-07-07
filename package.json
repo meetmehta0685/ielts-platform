@@ -1,0 +1,11 @@
+{
+  "name": "ielts-platform-root",
+  "version": "1.0.0",
+  "description": "Root package runner for IELTS AI Mentor Platform",
+  "scripts": {
+    "install:all": "npm install --prefix frontend && npm install --prefix backend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "dev:backend": "npm run dev --prefix backend",
+    "dev": "npx -y concurrently -n \"frontend,backend\" -c \"cyan,magenta\" \"npm run dev:frontend\" \"npm run dev:backend\""
+  }
+}

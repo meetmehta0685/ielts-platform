@@ -1,0 +1,152 @@
+[
+  {
+    "id": "reading-1",
+    "title": "The Rise of Artificial Intelligence in Education",
+    "duration": 60,
+    "passages": [
+      {
+        "id": 1,
+        "title": "Passage 1: AI Tools in Modern Classrooms",
+        "text": "Artificial Intelligence (AI) is rapidly transforming educational systems worldwide. From personalized tutoring software that adapts to a student's learning pace to automated grading systems, AI integration aims to optimize pedagogical efficiency. Proponents argue that intelligent tutoring systems allow teachers to dedicate more time to mentorship and emotional guidance. For example, AI algorithms can analyze a student's performance in real time, detecting conceptual weaknesses and generating targeted remedial exercises. However, critics express concern over privacy, data security, and the danger of replacing human teachers with rigid algorithms. They emphasize that critical thinking, empathy, and social cooperation are inherently human traits that cannot be programmed. Furthermore, access to high-quality AI tools is uneven, potentially widening the educational gap between wealthy and low-income districts.",
+        "questions": [
+          {
+            "id": 1,
+            "type": "true-false-not-given",
+            "questionText": "AI tools in schools are designed to help teachers spend more time on administrative tasks.",
+            "correctAnswer": "FALSE"
+          },
+          {
+            "id": 2,
+            "type": "true-false-not-given",
+            "questionText": "Personalized tutoring software can adapt and generate exercises based on real-time feedback.",
+            "correctAnswer": "TRUE"
+          },
+          {
+            "id": 3,
+            "type": "true-false-not-given",
+            "questionText": "Critics are concerned that AI tools will worsen the disparity in education quality between different income levels.",
+            "correctAnswer": "TRUE"
+          },
+          {
+            "id": 4,
+            "type": "multiple-choice",
+            "questionText": "What do proponents of classroom AI argue?",
+            "options": [
+              "A) It will replace teachers entirely.",
+              "B) It allows educators to focus on emotional guidance and mentoring.",
+              "C) It decreases classroom costs.",
+              "D) It renders textbooks obsolete."
+            ],
+            "correctAnswer": "B"
+          },
+          {
+            "id": 5,
+            "type": "fill-gap",
+            "questionText": "Critics worry that replacing human teachers with algorithms poses risks regarding database privacy and _____.",
+            "correctAnswer": "data security"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "reading-2",
+    "title": "The Evolution of Urban Architecture in the 20th Century",
+    "duration": 60,
+    "passages": [
+      {
+        "id": 1,
+        "title": "Passage 1: Rise of the Skyscraper",
+        "text": "The twentieth century witnessed a dramatic revolution in urban design and construction. Prior to this era, city buildings were constrained by the load-bearing capacity of masonry walls, limiting their height to just a few stories. However, the introduction of structural steel frames and the safety elevator, invented by Elisha Otis, unlocked vertical building possibilities. Architectural styles shifted rapidly in response. The Bauhaus movement, born in Germany, championed functionalist design that rejected decorative ornamentation in favor of clean lines, concrete, glass, and steel. Bauhaus principles dictated that a building's form should strictly follow its function. Later in the mid-century, Brutalism emerged, utilizing raw, exposed concrete to create imposing, monolithic structures. While some praised Brutalist projects as honest and democratic representations of social infrastructure, others criticized them as cold, hostile, and alienating to the communities they served.",
+        "questions": [
+          {
+            "id": 1,
+            "type": "true-false-not-given",
+            "questionText": "Before the twentieth century, masonry walls restricted the height of buildings in urban areas.",
+            "correctAnswer": "TRUE"
+          },
+          {
+            "id": 2,
+            "type": "true-false-not-given",
+            "questionText": "Bauhaus architecture emphasizes ornate decorations and traditional building materials.",
+            "correctAnswer": "FALSE"
+          },
+          {
+            "id": 3,
+            "type": "true-false-not-given",
+            "questionText": "Brutalist structures were universally praised by local communities.",
+            "correctAnswer": "FALSE"
+          },
+          {
+            "id": 4,
+            "type": "multiple-choice",
+            "questionText": "What key engineering innovation allowed cities to grow vertically?",
+            "options": [
+              "A) Ornate masonry facades",
+              "B) Timber scaffolding",
+              "C) Structural steel frames and safety elevators",
+              "D) Advanced plumbing networks"
+            ],
+            "correctAnswer": "C"
+          },
+          {
+            "id": 5,
+            "type": "fill-gap",
+            "questionText": "The German Bauhaus movement pioneered the architectural principle that form follows _____.",
+            "correctAnswer": "function"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "reading-3",
+    "title": "The Importance of Marine Kelp Forests",
+    "duration": 60,
+    "passages": [
+      {
+        "id": 1,
+        "title": "Passage 1: Underwater Forests and Global Ecology",
+        "text": "Kelp forests are some of the most vibrant and productive marine ecosystems on Earth, located primarily in temperate and polar coastal oceans. These underwater forests are composed of large brown algae called kelp, which grow rapidly and provide food and shelter for thousands of marine species. A key element of these ecosystems is the sea otter, a keystone species that maintains the forest's health by preying on herbivorous sea urchins. Without sea otters, sea urchins would reproduce unchecked, consuming kelp holdfasts and reducing lush forests to barren underwater deserts known as urchin barrens. Beyond hosting rich biodiversity, kelp forests play a crucial role in mitigating global climate change. Through photosynthesis, kelp sequesters large volumes of carbon dioxide at rates that can exceed terrestrial forests. However, ocean warming, pollution, and coastal development pose severe threats to these delicate environments, jeopardizing their survival.",
+        "questions": [
+          {
+            "id": 1,
+            "type": "true-false-not-given",
+            "questionText": "Kelp forests are found primarily in warm, tropical waters.",
+            "correctAnswer": "FALSE"
+          },
+          {
+            "id": 2,
+            "type": "true-false-not-given",
+            "questionText": "Sea otters protect kelp forests by eating sea urchins.",
+            "correctAnswer": "TRUE"
+          },
+          {
+            "id": 3,
+            "type": "true-false-not-given",
+            "questionText": "Kelp forests grow slower than typical land-based forests.",
+            "correctAnswer": "FALSE"
+          },
+          {
+            "id": 4,
+            "type": "multiple-choice",
+            "questionText": "What happens to a kelp forest when sea otter populations decline?",
+            "options": [
+              "A) Fish populations increase rapidly.",
+              "B) Herbivorous sea urchins consume the kelp, creating urchin barrens.",
+              "C) The kelp grows much taller.",
+              "D) Ocean temperatures decrease."
+            ],
+            "correctAnswer": "B"
+          },
+          {
+            "id": 5,
+            "type": "fill-gap",
+            "questionText": "Kelp belongs to the group of marine organisms known as brown _____.",
+            "correctAnswer": "algae"
+          }
+        ]
+      }
+    ]
+  }
+]

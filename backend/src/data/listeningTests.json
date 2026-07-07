@@ -1,0 +1,52 @@
+[
+  {
+    "id": "listening-1",
+    "title": "University Library Orientation Lecture",
+    "duration": 30,
+    "sections": [
+      {
+        "id": 1,
+        "audioUrl": "/audio/listening-test-1.mp3",
+        "instructions": "Listen to the library orientation audio and answer questions 1 to 5.",
+        "questions": [
+          {
+            "id": 1,
+            "type": "fill-gap",
+            "questionText": "The university library was established in the year _____.",
+            "correctAnswer": "1923"
+          },
+          {
+            "id": 2,
+            "type": "multiple-choice",
+            "questionText": "Where are the primary science journals located?",
+            "options": [
+              "A) On the Ground Floor",
+              "B) In the East Wing (Third Floor)",
+              "C) On the Second Floor",
+              "D) In the basement archives"
+            ],
+            "correctAnswer": "C"
+          },
+          {
+            "id": 3,
+            "type": "fill-gap",
+            "questionText": "Students can borrow a maximum of _____ books at any single time.",
+            "correctAnswer": "15"
+          },
+          {
+            "id": 4,
+            "type": "true-false-not-given",
+            "questionText": "Laptops can be rented from the library front desk for free.",
+            "correctAnswer": "TRUE"
+          },
+          {
+            "id": 5,
+            "type": "fill-gap",
+            "questionText": "The library closes at _____ PM on weekends.",
+            "correctAnswer": "8"
+          }
+        ]
+      }
+    ]
+  }
+]
