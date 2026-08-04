@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { OAUTH_NEXT_PATH_KEY, safeInternalPath } from "@/lib/auth-redirect";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -11,56 +12,78 @@ export default function AuthCallbackPage() {
   const [status, setStatus] = useState("Verifying connection...");
 
   useEffect(() => {
-    // Supabase will automatically process the hash/query parameters containing the tokens,
-    // update cookieStorage, and set the user session.
+    const nextPath = safeInternalPath(
+      window.sessionStorage.getItem(OAUTH_NEXT_PATH_KEY)
+    );
+    window.sessionStorage.removeItem(OAUTH_NEXT_PATH_KEY);
+    let cancelled = false;
+    let hasNavigated = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let subscription: ReturnType<typeof supabase.auth.onAuthStateChange>["data"]["subscription"] | undefined;
+
+    const navigateOnce = (path: string) => {
+      if (cancelled || hasNavigated) return;
+      hasNavigated = true;
+
+      if (timeoutId) clearTimeout(timeoutId);
+      subscription?.unsubscribe();
+      router.push(path);
+      router.refresh();
+    };
+
     const checkSession = async () => {
       try {
         const { data: { session }, error } = await supabase.auth.getSession();
-        
+
+        if (cancelled) return;
+
         if (error) {
           console.error("Auth callback session verification error:", error);
           toast.error("Authentication failed: " + error.message);
-          router.push("/auth/login");
+          navigateOnce("/auth/login");
           return;
         }
 
         if (session) {
           setStatus("Secure connection established. Setting up your workspace...");
           toast.success("Successfully logged in!");
-          router.push("/dashboard");
-          router.refresh();
+          navigateOnce(nextPath);
         } else {
-          // If no session is found, wait a moment or subscribe to auth state changes
-          const { data: { subscription } } = supabase.auth.onAuthStateChange(
+          const { data } = supabase.auth.onAuthStateChange(
             async (event, currentSession) => {
               if (currentSession) {
-                subscription.unsubscribe();
                 setStatus("Session synchronized. Loading dashboard...");
-                router.push("/dashboard");
-                router.refresh();
+                toast.success("Successfully logged in!");
+                navigateOnce(nextPath);
               }
             }
           );
+          subscription = data.subscription;
 
-          // Timeout after 6 seconds if no session is detected
-          const timeout = setTimeout(() => {
+          if (hasNavigated) {
             subscription.unsubscribe();
+            return;
+          }
+
+          timeoutId = setTimeout(() => {
+            if (cancelled || hasNavigated) return;
             toast.error("Authentication timed out. Please try logging in again.");
-            router.push("/auth/login");
+            navigateOnce("/auth/login");
           }, 6000);
-
-          return () => {
-            clearTimeout(timeout);
-            subscription.unsubscribe();
-          };
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error("Unexpected error in auth callback handler:", err);
-        router.push("/auth/login");
+        navigateOnce("/auth/login");
       }
     };
 
-    checkSession();
+    void checkSession();
+
+    return () => {
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+      subscription?.unsubscribe();
+    };
   }, [router]);
 
   return (

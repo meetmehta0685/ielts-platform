@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import { OAUTH_NEXT_PATH_KEY, safeInternalPath } from "@/lib/auth-redirect";
 import { toast } from "sonner";
 import { Loader2, Mail, Lock } from "lucide-react";
 
@@ -42,7 +43,7 @@ export function LoginForm() {
   const [isLoading, setIsLoading] = useState(false);
 
   // Check if there's a post-login redirect path
-  const redirectPath = searchParams.get("redirect") || "/dashboard";
+  const redirectPath = safeInternalPath(searchParams.get("redirect"));
 
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
@@ -55,7 +56,7 @@ export function LoginForm() {
   const onSubmit = async (values: LoginFormValues) => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
+      const { error } = await supabase.auth.signInWithPassword({
         email: values.email,
         password: values.password,
       });
@@ -73,8 +74,8 @@ export function LoginForm() {
       // Redirect user to target page
       router.push(redirectPath);
       router.refresh();
-    } catch (error: any) {
-      toast.error(error.message || "Failed to log in.");
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : "Failed to log in.");
     } finally {
       setIsLoading(false);
     }
@@ -83,15 +84,19 @@ export function LoginForm() {
   const handleGoogleLogin = async () => {
     setIsLoading(true);
     try {
+      const callbackUrl = new URL("/auth/callback", window.location.origin);
+      window.sessionStorage.setItem(OAUTH_NEXT_PATH_KEY, redirectPath);
+
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
+          redirectTo: callbackUrl.toString(),
         },
       });
       if (error) throw error;
-    } catch (error: any) {
-      toast.error(error.message || "Failed to initiate Google login.");
+    } catch (error: unknown) {
+      window.sessionStorage.removeItem(OAUTH_NEXT_PATH_KEY);
+      toast.error(error instanceof Error ? error.message : "Failed to initiate Google login.");
       setIsLoading(false);
     }
   };
@@ -193,7 +198,7 @@ export function LoginForm() {
       </CardContent>
       <CardFooter className="flex flex-col space-y-2">
         <div className="text-sm text-center text-muted-foreground">
-          Don't have an account yet?{" "}
+          Don&apos;t have an account yet?{" "}
           <Link
             href="/auth/signup"
             className="text-primary hover:underline font-medium"

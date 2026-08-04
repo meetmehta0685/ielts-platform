@@ -2,7 +2,9 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
+import type { User as SupabaseUser } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
+import { OAUTH_NEXT_PATH_KEY, safeInternalPath } from "@/lib/auth-redirect";
 import {
   Sparkles,
   ArrowRight,
@@ -56,7 +58,7 @@ const CHAT_GUIDES = {
 
 export default function Home() {
   // Authentication state
-  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [currentUser, setCurrentUser] = useState<SupabaseUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
   // Interface states
@@ -69,13 +71,35 @@ export default function Home() {
 
   // Load session on mount
   useEffect(() => {
+    const currentUrl = new URL(window.location.href);
+    const hashParams = new URLSearchParams(currentUrl.hash.slice(1));
+    const isOAuthReturn =
+      currentUrl.searchParams.has("code") ||
+      currentUrl.searchParams.has("error") ||
+      hashParams.has("access_token") ||
+      hashParams.has("error");
+    let isRedirecting = false;
+
+    const finishOAuthReturn = (hasSession: boolean) => {
+      if (!isOAuthReturn || isRedirecting) return;
+
+      isRedirecting = true;
+      const nextPath = safeInternalPath(
+        window.sessionStorage.getItem(OAUTH_NEXT_PATH_KEY)
+      );
+      window.sessionStorage.removeItem(OAUTH_NEXT_PATH_KEY);
+      window.location.replace(hasSession ? nextPath : "/auth/login");
+    };
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setCurrentUser(session?.user ?? null);
       setAuthLoading(false);
+      finishOAuthReturn(Boolean(session));
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setCurrentUser(session?.user ?? null);
+      if (session) finishOAuthReturn(true);
     });
 
     return () => subscription.unsubscribe();
@@ -974,7 +998,7 @@ export default function Home() {
                 </div>
                 <h4 className="text-base font-bold text-white mb-1">Check your inbox!</h4>
                 <p className="text-xs text-stone-300 leading-normal font-medium">
-                  We've sent a 10% discount study voucher and guide link. Let's begin the roadmap!
+                  We&apos;ve sent a 10% discount study voucher and guide link. Let&apos;s begin the roadmap!
                 </p>
               </div>
             ) : (

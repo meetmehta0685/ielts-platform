@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import type { CSSProperties } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { toast } from "sonner";
-import { Loader2, Mic, Play, Square, Award, Volume2, ArrowLeft, CheckCircle, RefreshCw, Clock, Video } from "lucide-react";
+import { Loader2, Mic, Square, Volume2, ArrowLeft, CheckCircle, RefreshCw, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -62,7 +63,6 @@ function SpeakingPageContent() {
   const [candidateId, setCandidateId] = useState("ielts-candidate");
 
   // CBT Configuration States
-  const [isTimerHidden, setIsTimerHidden] = useState(false);
   const [fontScale, setFontScale] = useState<"sm" | "base" | "lg">("base");
 
   // Flow states
@@ -74,7 +74,6 @@ function SpeakingPageContent() {
   const [isPrepping, setIsPrepping] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
-  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [notepadText, setNotepadText] = useState("");
 
   // MediaRecorder refs
@@ -157,7 +156,7 @@ function SpeakingPageContent() {
           examiner_comments: attemptData.feedback_json?.examiner_comments || "",
           improvements: attemptData.feedback_json?.improvements || [],
         });
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error("Failed to load speaking attempt:", err);
         toast.error("Failed to load speaking attempt details.");
       }
@@ -331,7 +330,6 @@ function SpeakingPageContent() {
     }
 
     setTranscript("");
-    setAudioBlob(null);
     audioChunksRef.current = [];
     setRecordingSeconds(0);
 
@@ -348,7 +346,6 @@ function SpeakingPageContent() {
 
       mediaRecorder.onstop = () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-        setAudioBlob(audioBlob);
         stream.getTracks().forEach((track) => track.stop());
         handleTranscribe(audioBlob);
       };
@@ -402,14 +399,19 @@ function SpeakingPageContent() {
       });
 
       if (!response.ok) {
-        throw new Error("Speech recognition failed. Please try recording again.");
+        const errorData = await response.json().catch(() => null);
+        throw new Error(
+          typeof errorData?.error === "string"
+            ? errorData.error
+            : "Speech recognition failed. Please try recording again."
+        );
       }
 
       const data = await response.json();
       setTranscript(data.transcript || "");
       toast.success("Speech transcribed successfully!");
-    } catch (err: any) {
-      toast.error(err.message || "Failed to transcribe audio.");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to transcribe audio.");
     } finally {
       setIsTranscribing(false);
     }
@@ -453,44 +455,74 @@ function SpeakingPageContent() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let accumulated = "";
+      let eventBuffer = "";
       let finalResult: SpeakingResult | null = null;
+
+      const processEventLine = (line: string) => {
+        const trimmedLine = line.trim();
+        if (!trimmedLine.startsWith("data: ")) return;
+
+        const dataStr = trimmedLine.slice(6).trim();
+        if (!dataStr || dataStr === "[DONE]") return;
+
+        let data: {
+          token?: string;
+          done?: boolean;
+          id?: string;
+          result?: Partial<SpeakingResult>;
+          error?: unknown;
+        };
+        try {
+          data = JSON.parse(dataStr);
+        } catch {
+          throw new Error("The evaluation server returned an invalid stream event.");
+        }
+
+        if (data.token) {
+          accumulated += data.token;
+          setStreamingText(accumulated);
+          return;
+        }
+
+        if (data.done) {
+          if (!data.result) {
+            throw new Error("The evaluation server completed without a result.");
+          }
+          finalResult = {
+            id: data.id,
+            band_score: Number(data.result.band_score),
+            fluency_coherence: Number(data.result.fluency_coherence),
+            lexical_resource: Number(data.result.lexical_resource),
+            grammatical_range: Number(data.result.grammatical_range),
+            pronunciation: Number(data.result.pronunciation),
+            examiner_comments: data.result.examiner_comments || "",
+            improvements: data.result.improvements || [],
+          };
+          return;
+        }
+
+        if (data.error) {
+          throw new Error(
+            typeof data.error === "string"
+              ? data.error
+              : "The evaluation server reported an error."
+          );
+        }
+      };
 
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n");
+        eventBuffer += decoder.decode(value, { stream: true });
+        const lines = eventBuffer.split("\n");
+        eventBuffer = lines.pop() || "";
+        lines.forEach(processEventLine);
+      }
 
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const dataStr = line.slice(6).trim();
-              if (dataStr === "[DONE]") continue;
-
-              const data = JSON.parse(dataStr);
-              if (data.token) {
-                accumulated += data.token;
-                setStreamingText(accumulated);
-              } else if (data.done) {
-                finalResult = {
-                  id: data.id,
-                  band_score: Number(data.result.band_score),
-                  fluency_coherence: Number(data.result.fluency_coherence),
-                  lexical_resource: Number(data.result.lexical_resource),
-                  grammatical_range: Number(data.result.grammatical_range),
-                  pronunciation: Number(data.result.pronunciation),
-                  examiner_comments: data.result.examiner_comments || "",
-                  improvements: data.result.improvements || [],
-                };
-              } else if (data.error) {
-                throw new Error(data.error);
-              }
-            } catch (err) {
-              // Ignore chunk boundaries JSON parsing errors
-            }
-          }
-        }
+      eventBuffer += decoder.decode();
+      if (eventBuffer.trim()) {
+        processEventLine(eventBuffer);
       }
 
       if (finalResult) {
@@ -511,8 +543,8 @@ function SpeakingPageContent() {
       } else {
         throw new Error("Failed to receive completed speaking evaluation from server.");
       }
-    } catch (err: any) {
-      toast.error(err.message || "Failed to grade speaking attempt.");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to grade speaking attempt.");
     } finally {
       setIsGrading(false);
       setStreamingText("");
@@ -523,7 +555,6 @@ function SpeakingPageContent() {
     if (currentPartIdx < SPEAKING_PARTS.length - 1) {
       setCurrentPartIdx((prev) => prev + 1);
       setTranscript("");
-      setAudioBlob(null);
       setResult(null);
       setNotepadText("");
     }
@@ -531,7 +562,6 @@ function SpeakingPageContent() {
 
   const handleReset = () => {
     setTranscript("");
-    setAudioBlob(null);
     setResult(null);
     setRecordingSeconds(0);
     setPrepSeconds(0);
@@ -566,7 +596,7 @@ function SpeakingPageContent() {
     <div className="min-h-screen bg-muted/20 flex flex-col justify-between" style={{
       "--scrollbar-thumb": "rgba(100, 116, 139, 0.4)",
       "--scrollbar-track": "rgba(241, 245, 249, 0.5)"
-    } as any}>
+    } as CSSProperties}>
       {/* Dynamic Keyframe style tag */}
       <style>{`
         @keyframes speaking-bar-pulse {
@@ -586,13 +616,13 @@ function SpeakingPageContent() {
               <ArrowLeft className="h-4 w-4" />
             </Button>
           </a>
-          <span className="font-bold tracking-tight text-white">IELTS Video Call Speaking Mock</span>
+          <span className="font-bold tracking-tight text-white">IELTS Speaking Practice</span>
         </div>
 
         {/* Center Indicator */}
         <div className="flex items-center gap-2">
           <span className="text-xs uppercase bg-primary px-2.5 py-1 rounded font-extrabold tracking-wider">
-            VCS Mode
+            Recorded Practice
           </span>
           <span className="text-xs text-white/70 font-bold border-l border-white/20 pl-2">
             Part {currentPart.part} of 3
@@ -645,57 +675,54 @@ function SpeakingPageContent() {
         {!result ? (
           <div className="flex flex-1 overflow-hidden flex-col lg:flex-row">
             
-            {/* Left Panel: Remote Examiner VCS webcam feed mockup */}
+            {/* Left Panel: recorded examiner prompt */}
             <div className="flex-1 bg-slate-950 p-6 flex flex-col justify-between relative border-b lg:border-b-0 lg:border-r border-slate-800">
-              {/* VCS State tags */}
               <div className="flex justify-between items-center z-10">
-                <div className="flex items-center gap-2 bg-slate-900/80 border border-slate-700/50 backdrop-blur px-3 py-1.5 rounded-lg text-[10px] text-white font-bold tracking-wider uppercase">
-                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                  Remote Examiner Feed: Connected
-                </div>
-                <div className="bg-slate-900/80 border border-slate-700/50 backdrop-blur px-3 py-1.5 rounded-lg text-[10px] text-white/70 font-semibold font-mono">
-                  IELTS VCS ID: VC-10492
-                </div>
+                    <div className="flex items-center gap-2 bg-slate-900/80 border border-slate-700/50 backdrop-blur px-3 py-1.5 rounded-lg text-[10px] text-white font-bold tracking-wider uppercase">
+                      <span className="h-2 w-2 rounded-full bg-amber-400" />
+                      Recorded examiner simulation
+                    </div>
+                    <div className="bg-slate-900/80 border border-slate-700/50 backdrop-blur px-3 py-1.5 rounded-lg text-[10px] text-white/70 font-semibold font-mono">
+                      Part {currentPart.part}
+                    </div>
               </div>
 
-              {/* Examiner Video Stream Window */}
               <div className="flex-1 flex flex-col items-center justify-center py-8 relative">
-                <div className={`w-full max-w-xl aspect-video bg-slate-900 border-4 rounded-2xl relative overflow-hidden shadow-2xl transition-all duration-300 ${
-                  isSpeakingPrompt ? "border-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.3)]" : "border-slate-800"
-                }`}>
-                  <img 
-                    src="/examiner.png" 
-                    alt="Dr. Sarah Jenkins" 
-                    className={`w-full h-full object-cover transition-transform duration-500 ${isSpeakingPrompt ? "scale-105" : "scale-100"}`}
-                  />
-                  <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur px-2.5 py-1 rounded-md text-[10px] text-white font-semibold">
-                    Dr. Sarah Jenkins (IELTS VCS Examiner)
-                  </div>
-                  {isSpeakingPrompt && (
-                    <div className="absolute top-2 right-2 bg-emerald-500 text-white text-[9px] font-bold uppercase tracking-widest px-2.5 py-1 rounded animate-pulse">
-                      Speaking
+                    <div className={`w-full max-w-xl aspect-video bg-slate-900 border-4 rounded-2xl relative overflow-hidden shadow-2xl transition-all duration-300 ${
+                      isSpeakingPrompt ? "border-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.3)]" : "border-slate-800"
+                    }`}>
+                      <img
+                        src="/examiner.png"
+                        alt="Dr. Sarah Jenkins"
+                        className={`w-full h-full object-cover transition-transform duration-500 ${isSpeakingPrompt ? "scale-105" : "scale-100"}`}
+                      />
+                      <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur px-2.5 py-1 rounded-md text-[10px] text-white font-semibold">
+                        Dr. Sarah Jenkins (Recorded Examiner)
+                      </div>
+                      {isSpeakingPrompt && (
+                        <div className="absolute top-2 right-2 bg-emerald-500 text-white text-[9px] font-bold uppercase tracking-widest px-2.5 py-1 rounded animate-pulse">
+                          Speaking
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
 
-                {/* Subtitles Closed Captions overlay */}
-                <div className="absolute bottom-2 left-0 right-0 mx-auto max-w-lg bg-black/75 border border-slate-800 backdrop-blur rounded-xl p-4 text-center">
-                  <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mb-1.5 flex items-center justify-center gap-1">
-                    <Volume2 className="h-3.5 w-3.5 text-[#ffc72c]" /> Closed Captions
-                  </p>
-                  <p className={`${getTextSizeClass()} text-white leading-relaxed font-medium`}>
-                    "{currentPart.question}"
-                  </p>
-                  <Button
-                    onClick={speakQuestion}
-                    variant="ghost"
-                    size="xs"
-                    className="mt-2 text-[10px] text-[#ffc72c] h-6 border border-[#ffc72c]/30 hover:bg-[#ffc72c]/10 hover:text-[#ffb700]"
-                    disabled={isSpeakingPrompt}
-                  >
-                    {isSpeakingPrompt ? "Examiner Speaking..." : "Play Voice Prompts"}
-                  </Button>
-                </div>
+                    <div className="absolute bottom-2 left-0 right-0 mx-auto max-w-lg bg-black/75 border border-slate-800 backdrop-blur rounded-xl p-4 text-center">
+                      <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mb-1.5 flex items-center justify-center gap-1">
+                        <Volume2 className="h-3.5 w-3.5 text-[#ffc72c]" /> Closed Captions
+                      </p>
+                      <p className={`${getTextSizeClass()} text-white leading-relaxed font-medium`}>
+                        &ldquo;{currentPart.question}&rdquo;
+                      </p>
+                      <Button
+                        onClick={speakQuestion}
+                        variant="ghost"
+                        size="xs"
+                        className="mt-2 text-[10px] text-[#ffc72c] h-6 border border-[#ffc72c]/30 hover:bg-[#ffc72c]/10 hover:text-[#ffb700]"
+                        disabled={isSpeakingPrompt}
+                      >
+                        {isSpeakingPrompt ? "Examiner Speaking..." : "Play Voice Prompts"}
+                      </Button>
+                    </div>
               </div>
             </div>
 

@@ -1,16 +1,22 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import dynamic from "next/dynamic";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, ArrowLeft, CheckCircle, Clock, BookOpen, Volume2, Mic, Play, Pause, Square, Award, ArrowRight, Video, PenTool } from "lucide-react";
+import { Loader2, ArrowLeft, Clock, BookOpen, Play, Pause, ArrowRight, PenTool } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+const SpeakingLiveKitRoom = dynamic(
+  () => import("@/components/simulator/speaking-livekit-room"),
+  { ssr: false },
+);
 
 function calculateOverallIELTS(scores: number[]) {
   const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
@@ -28,6 +34,7 @@ export default function SimulatorPage() {
   // Candidate Details
   const [candidateName, setCandidateName] = useState("Candidate");
   const [candidateId, setCandidateId] = useState("ielts-candidate");
+  const [examAttemptId, setExamAttemptId] = useState<string | null>(null);
 
   // Steps: 'intro' | 'listening' | 'reading' | 'writing' | 'speaking' | 'report'
   const [step, setStep] = useState<"intro" | "listening" | "reading" | "writing" | "speaking" | "report">("intro");
@@ -73,25 +80,17 @@ export default function SimulatorPage() {
   // SPEAKING MODULE LOCAL STATES
   // ----------------------------------------------------
   const [transcript, setTranscript] = useState("");
-  const [isSpeakingPrompt, setIsSpeakingPrompt] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingSeconds, setRecordingSeconds] = useState(0);
-  const [isTranscribing, setIsTranscribing] = useState(false);
-  const [speakingPrepSeconds, setSpeakingPrepSeconds] = useState(0);
-  const [isSpeakingPrepping, setIsSpeakingPrepping] = useState(false);
-  const [speakingNotepad, setSpeakingNotepad] = useState("");
-
-  // Candidate Webcam stream and ref
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
-
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const speakingPrepTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const recordTimerRef = useRef<NodeJS.Timeout | null>(null);
   const speakingPromptText = "Let's talk about cultural traditions. Do you think it is important for a society to maintain its traditional cultural values in the modern era, and why?";
 
   // Auth fetch
+  useEffect(() => {
+    const generatedAttemptId =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `attempt-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setExamAttemptId(generatedAttemptId);
+  }, []);
+
   useEffect(() => {
     const fetchSession = async () => {
       try {
@@ -164,54 +163,6 @@ export default function SimulatorPage() {
       if (timer) clearInterval(timer);
     };
   }, [isTimerActive, timeLeft, step, isProcessingStep]);
-
-  // ElevenLabs custom HTML5 audio ref
-  const elevenLabsAudioRef = useRef<HTMLAudioElement | null>(null);
-
-  // Clean timers on unmount
-  useEffect(() => {
-    return () => {
-      if (speakingPrepTimerRef.current) clearInterval(speakingPrepTimerRef.current);
-      if (recordTimerRef.current) clearInterval(recordTimerRef.current);
-      if (typeof window !== "undefined" && window.speechSynthesis) {
-        window.speechSynthesis.cancel();
-      }
-      if (elevenLabsAudioRef.current) {
-        elevenLabsAudioRef.current.pause();
-      }
-    };
-  }, []);
-
-  // Camera stream source setter
-  useEffect(() => {
-    if (videoRef.current && cameraStream) {
-      videoRef.current.srcObject = cameraStream;
-    }
-  }, [cameraStream]);
-
-  // Clean webcam on unmount
-  useEffect(() => {
-    return () => {
-      if (cameraStream) {
-        cameraStream.getTracks().forEach(track => track.stop());
-      }
-    };
-  }, [cameraStream]);
-
-  const toggleCamera = async () => {
-    if (cameraStream) {
-      cameraStream.getTracks().forEach(track => track.stop());
-      setCameraStream(null);
-    } else {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-        setCameraStream(stream);
-      } catch (err) {
-        console.error("[Webcam Access Error]:", err);
-        toast.error("Failed to access camera. Please check camera permissions.");
-      }
-    }
-  };
 
   // ----------------------------------------------------
   // TRANSITION & GRADING PIPELINES
@@ -353,8 +304,14 @@ export default function SimulatorPage() {
     }
   };
 
-  const handleFinishSpeaking = async () => {
+  const handleFinishSpeaking = async (transcriptOverride?: string) => {
     if (!token) return;
+    const finalTranscript = (transcriptOverride || transcript).trim();
+
+    if (finalTranscript.length < 10) {
+      toast.error("The AI examiner has not received enough speech to grade yet.");
+      return;
+    }
     setIsProcessingStep(true);
     setIsTimerActive(false);
     try {
@@ -367,7 +324,7 @@ export default function SimulatorPage() {
         body: JSON.stringify({
           part: 3,
           prompt: speakingPromptText,
-          transcript,
+          transcript: finalTranscript,
         }),
       });
 
@@ -421,179 +378,6 @@ export default function SimulatorPage() {
     }
   };
 
-  // Fallback to browser-native TTS
-  const playBrowserSpeech = (text: string) => {
-    if (typeof window === "undefined" || !window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = "en-US";
-    const voices = window.speechSynthesis.getVoices();
-    const englishVoice = voices.find(v => v.lang.startsWith("en-") && v.name.includes("Google")) ||
-                        voices.find(v => v.lang.startsWith("en-"));
-    if (englishVoice) {
-      utterance.voice = englishVoice;
-    }
-    utterance.onstart = () => setIsSpeakingPrompt(true);
-    utterance.onend = () => setIsSpeakingPrompt(false);
-    utterance.onerror = () => setIsSpeakingPrompt(false);
-    window.speechSynthesis.speak(utterance);
-  };
-
-  // Speaking voice triggers
-  const speakQuestion = async () => {
-    // 1. Cancel browser-native voice if active
-    if (typeof window !== "undefined" && window.speechSynthesis) {
-      window.speechSynthesis.cancel();
-    }
-    // 2. Stop ElevenLabs audio if already playing
-    if (elevenLabsAudioRef.current) {
-      elevenLabsAudioRef.current.pause();
-      elevenLabsAudioRef.current = null;
-      setIsSpeakingPrompt(false);
-      return; // Act as a toggle to pause
-    }
-
-    setIsSpeakingPrompt(true);
-
-    try {
-      const response = await fetch(`${BACKEND_URL}/api/speaking/synthesize`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          text: speakingPromptText,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed response from voice service");
-      }
-
-      const contentType = response.headers.get("Content-Type");
-      if (contentType && contentType.includes("application/json")) {
-        const data = await response.json();
-        if (data.fallback) {
-          console.log("[ElevenLabs Fallback] Key missing or disabled, using browser native.");
-          playBrowserSpeech(speakingPromptText);
-          return;
-        }
-        throw new Error(data.error || "Synthesis response is JSON error");
-      }
-
-      // If it is binary audio, convert to blob url and play
-      const audioBlob = await response.blob();
-      const audioUrl = URL.createObjectURL(audioBlob);
-      const audio = new Audio(audioUrl);
-      elevenLabsAudioRef.current = audio;
-
-      audio.onended = () => {
-        setIsSpeakingPrompt(false);
-        URL.revokeObjectURL(audioUrl);
-      };
-      audio.onerror = (e) => {
-        console.error("[Audio Playback Error]", e);
-        setIsSpeakingPrompt(false);
-        URL.revokeObjectURL(audioUrl);
-        // Fallback to browser synthesis
-        playBrowserSpeech(speakingPromptText);
-      };
-      
-      await audio.play();
-    } catch (error) {
-      console.warn("[ElevenLabs API Error] falling back to browser voice:", error);
-      playBrowserSpeech(speakingPromptText);
-    }
-  };
-
-  // Speaking Part 2 Preparation timer
-  const startSpeakingPrepTimer = () => {
-    setIsSpeakingPrepping(true);
-    setSpeakingPrepSeconds(60);
-
-    if (speakingPrepTimerRef.current) clearInterval(speakingPrepTimerRef.current);
-    speakingPrepTimerRef.current = setInterval(() => {
-      setSpeakingPrepSeconds((prev) => {
-        if (prev <= 1) {
-          clearInterval(speakingPrepTimerRef.current!);
-          setIsSpeakingPrepping(false);
-          startSpeakingRecording(); // start automatically
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  };
-
-  // Speaking Recording triggers
-  const startSpeakingRecording = async () => {
-    if (isSpeakingPrepping) {
-      if (speakingPrepTimerRef.current) clearInterval(speakingPrepTimerRef.current);
-      setIsSpeakingPrepping(false);
-    }
-
-    setTranscript("");
-    audioChunksRef.current = [];
-    setRecordingSeconds(0);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
-      mediaRecorderRef.current = mediaRecorder;
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) audioChunksRef.current.push(event.data);
-      };
-      mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-        stream.getTracks().forEach((track) => track.stop());
-        handleTranscribe(audioBlob);
-      };
-      mediaRecorder.start();
-      setIsRecording(true);
-      if (recordTimerRef.current) clearInterval(recordTimerRef.current);
-      recordTimerRef.current = setInterval(() => {
-        setRecordingSeconds((prev) => {
-          if (prev >= 120) {
-            stopSpeakingRecording();
-            return 120;
-          }
-          return prev + 1;
-        });
-      }, 1000);
-    } catch (err) {
-      toast.error("Microphone access failed.");
-    }
-  };
-
-  const stopSpeakingRecording = () => {
-    if (!mediaRecorderRef.current || !isRecording) return;
-    if (recordTimerRef.current) clearInterval(recordTimerRef.current);
-    mediaRecorderRef.current.stop();
-    setIsRecording(false);
-  };
-
-  const handleTranscribe = async (blob: Blob) => {
-    if (!token) return;
-    setIsTranscribing(true);
-    try {
-      const formData = new FormData();
-      formData.append("audio", blob, "speak.webm");
-      const res = await fetch(`${BACKEND_URL}/api/speaking/transcribe`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-      if (!res.ok) throw new Error("Whisper fail");
-      const data = await res.json();
-      setTranscript(data.transcript);
-    } catch (err) {
-      toast.error("Audio transcription failed.");
-    } finally {
-      setIsTranscribing(false);
-    }
-  };
-
-  // Audio player triggers (Listening section)
   const toggleListeningPlay = () => {
     if (!audioRef.current) return;
     if (isPlaying) {
@@ -1207,219 +991,17 @@ export default function SimulatorPage() {
           </div>
         )}
 
-        {/* STEP 5: SPEAKING - VCS VIDEO INTERVIEW MOCKUP */}
-        {step === "speaking" && (
-          <div className="flex-1 flex h-full overflow-hidden flex-col lg:flex-row">
-            
-            {/* Left Panel: Examiner Stream mockup */}
-            <div className="flex-1 bg-slate-950 p-6 flex flex-col justify-between relative border-b lg:border-b-0 lg:border-r border-slate-800">
-              <div className="flex justify-between items-center z-10">
-                <div className="flex items-center gap-2 bg-slate-900/80 border border-slate-700/50 backdrop-blur px-3 py-1.5 rounded-lg text-[10px] text-white font-bold tracking-wider uppercase">
-                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                  Examiner Video Call: Connected
-                </div>
-                <div className="bg-slate-900/80 border border-slate-700/50 backdrop-blur px-3 py-1.5 rounded-lg text-[10px] text-white/70 font-semibold font-mono">
-                  Mock Interview Mode
-                </div>
-              </div>
-
-              {/* Examiner Video Stream Window */}
-              <div className="flex-1 flex flex-col items-center justify-center py-8 relative">
-                <div className={`w-full max-w-xl aspect-video bg-slate-900 border-4 rounded-2xl relative overflow-hidden shadow-2xl transition-all duration-300 ${
-                  isSpeakingPrompt ? "border-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.3)]" : "border-slate-800"
-                }`}>
-                  <img 
-                    src="/examiner.png" 
-                    alt="Dr. Sarah Jenkins" 
-                    className={`w-full h-full object-cover transition-transform duration-500 ${isSpeakingPrompt ? "scale-105" : "scale-100"}`}
-                  />
-                  <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur px-2.5 py-1 rounded-md text-[10px] text-white font-semibold">
-                    Dr. Sarah Jenkins (IELTS VCS Examiner)
-                  </div>
-                  {isSpeakingPrompt && (
-                    <div className="absolute top-2 right-2 bg-emerald-500 text-white text-[9px] font-bold uppercase tracking-widest px-2.5 py-1 rounded animate-pulse">
-                      Speaking
-                    </div>
-                  )}
-                </div>
-
-                {/* Subtitles Overlay */}
-                <div className="absolute bottom-2 left-0 right-0 mx-auto max-w-lg bg-black/75 border border-slate-800 backdrop-blur rounded-xl p-4 text-center">
-                  <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mb-1.5 flex items-center justify-center gap-1">
-                    <Volume2 className="h-3.5 w-3.5 text-[#ffc72c]" /> Closed Captions
-                  </p>
-                  <p className={`${getTextSizeClass()} text-white leading-relaxed font-medium`}>
-                    "{speakingPromptText}"
-                  </p>
-                  <Button
-                    onClick={speakQuestion}
-                    variant="ghost"
-                    size="xs"
-                    className="mt-2 text-[10px] text-[#ffc72c] h-6 border border-[#ffc72c]/30 hover:bg-[#ffc72c]/10 hover:text-[#ffb700]"
-                    disabled={isSpeakingPrompt}
-                  >
-                    {isSpeakingPrompt ? "Examiner Speaking..." : "Play Examiner Voice"}
-                  </Button>
-                </div>
-              </div>
-            </div>
-
-            {/* Right Panel: Candidate Workspace */}
-            <div className="w-full lg:w-[480px] xl:w-[540px] overflow-y-auto bg-muted/15 p-6 flex flex-col justify-between shrink-0" style={{
-              scrollbarColor: "var(--scrollbar-thumb) var(--scrollbar-track)",
-              scrollbarWidth: "thin"
-            }}>
-              
-              <div className="space-y-6 flex-grow">
-                {/* Candidate Webcam container */}
-                <div className="aspect-video bg-slate-900 border border-slate-800 rounded-xl relative overflow-hidden flex flex-col items-center justify-center shadow-md">
-                  <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/60 px-2 py-0.5 rounded text-[9px] text-white font-bold font-mono z-10">
-                    {isRecording ? (
-                      <>
-                        <span className="h-1.5 w-1.5 rounded-full bg-rose-500 animate-ping" />
-                        REC LIVE
-                      </>
-                    ) : (
-                      <>
-                        <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
-                        PREVIEW ONLY
-                      </>
-                    )}
-                  </div>
-
-                  {cameraStream ? (
-                    <video
-                      ref={videoRef}
-                      autoPlay
-                      playsInline
-                      muted
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex flex-col items-center gap-2">
-                      <Mic className={`h-12 w-12 text-slate-700 ${isRecording ? "text-primary animate-pulse" : ""}`} />
-                    </div>
-                  )}
-
-                  <div className="absolute bottom-2 right-2 text-[9px] text-slate-400 bg-black/60 px-2 py-0.5 rounded font-mono font-bold capitalize z-10">
-                    {candidateName}
-                  </div>
-
-                  {/* Camera toggle button */}
-                  <div className="absolute top-2 right-2 z-10">
-                    <Button
-                      onClick={toggleCamera}
-                      variant="outline"
-                      size="xs"
-                      className="text-[9px] h-5 bg-black/60 border-white/25 hover:bg-black/90 text-white font-bold"
-                    >
-                      {cameraStream ? "Camera On" : "Turn On Camera"}
-                    </Button>
-                  </div>
-
-                  {/* Audio Visualizer Wave */}
-                  {isRecording && (
-                    <div className="absolute bottom-2 left-2 flex items-end gap-1 h-6">
-                      {[...Array(8)].map((_, i) => (
-                        <div
-                          key={i}
-                          className="w-0.5 bg-primary rounded-full speaking-bar"
-                          style={{
-                            height: `${[35, 75, 45, 95, 55, 35, 65, 30][i]}%`,
-                            animationDelay: `${i * 0.1}s`
-                          }}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Cue Card / Prep notes */}
-                <Card className="border-amber-100 bg-amber-50/10 shadow-xs">
-                  <CardHeader className="p-4 pb-2 border-b border-amber-100/30">
-                    <CardTitle className="text-xs font-bold text-amber-600 uppercase tracking-widest flex items-center gap-2">
-                      <Clock className="h-4 w-4" /> Part 2 Cue Card (Long Turn)
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-4 space-y-3">
-                    {isSpeakingPrepping ? (
-                      <div className="text-center space-y-1 py-2">
-                        <div className="text-[10px] font-bold text-amber-500 uppercase tracking-wider">Preparation Countdown</div>
-                        <div className="text-3xl font-black text-amber-500 font-mono animate-pulse">{speakingPrepSeconds}s</div>
-                        <p className="text-[10px] text-muted-foreground">Recording will auto-start. Note points below.</p>
-                      </div>
-                    ) : (
-                      <div className="flex gap-2">
-                        <Button onClick={startSpeakingPrepTimer} size="sm" variant="outline" className="text-xs h-9 border-amber-300 text-amber-600 hover:bg-amber-50/50">
-                          Start 1-Min Prep
-                        </Button>
-                        <Button onClick={startSpeakingRecording} size="sm" className="text-xs h-9 bg-primary">
-                          Speak Directly
-                        </Button>
-                      </div>
-                    )}
-
-                    <div className="space-y-1 mt-2">
-                      <label className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground block">Notepad Notes</label>
-                      <Textarea 
-                        placeholder="Write down brief notes here..."
-                        value={speakingNotepad}
-                        onChange={(e) => setSpeakingNotepad(e.target.value)}
-                        className="min-h-[80px] text-xs font-sans leading-relaxed"
-                        disabled={isProcessingStep}
-                      />
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Controls */}
-                <div className="bg-background rounded-xl p-4 border border-muted/50 flex flex-col items-center justify-center space-y-3 shadow-xs">
-                  {isRecording ? (
-                    <div className="text-center space-y-2">
-                      <div className="text-[10px] font-bold text-rose-500 uppercase tracking-widest animate-pulse">Recording Speech</div>
-                      <div className="text-3xl font-black font-mono text-foreground">{formatTime(recordingSeconds)}</div>
-                      <Button onClick={stopSpeakingRecording} variant="destructive" size="icon" className="h-10 w-10 rounded-full flex items-center justify-center p-0 shadow-md">
-                        <Square className="h-4 w-4 fill-current" />
-                      </Button>
-                    </div>
-                  ) : (
-                    !isSpeakingPrepping && (
-                      <div className="text-center space-y-1.5 py-1">
-                        <p className="text-xs text-muted-foreground">Record response to examiner prompt above.</p>
-                        <Button onClick={startSpeakingRecording} size="lg" className="h-10 bg-primary gap-1.5" disabled={isProcessingStep}>
-                          <Mic className="h-4 w-4" /> Record Speech
-                        </Button>
-                      </div>
-                    )
-                  )}
-                </div>
-
-                {/* Spoken Transcript */}
-                {(isTranscribing || transcript) && (
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground block">Spoken Transcript</label>
-                    {isTranscribing ? (
-                      <div className="rounded-xl border border-muted/50 p-4 bg-background/50 flex items-center gap-3 text-xs text-muted-foreground">
-                        <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
-                        <span>Transcribing audio with Whisper AI...</span>
-                      </div>
-                    ) : (
-                      <p className="rounded-xl border border-muted/50 p-4 bg-background/50 text-xs text-foreground leading-relaxed font-medium max-h-[140px] overflow-y-auto">
-                        {transcript}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Submission block */}
-              {transcript && !isTranscribing && !isRecording && (
-                <Button onClick={handleFinishSpeaking} className="w-full h-11 mt-6" disabled={isProcessingStep}>
-                  {isProcessingStep ? <Loader2 className="h-4 w-4 animate-spin" /> : "Complete Examination Simulator"}
-                </Button>
-              )}
-            </div>
-          </div>
+        {/* STEP 5: SPEAKING - LIVEKIT AI EXAMINER */}
+        {step === "speaking" && token && examAttemptId && (
+          <SpeakingLiveKitRoom
+            backendUrl={BACKEND_URL}
+            authToken={token}
+            attemptId={examAttemptId}
+            candidateName={candidateName}
+            prompt={speakingPromptText}
+            onTranscriptChange={setTranscript}
+            onComplete={handleFinishSpeaking}
+          />
         )}
 
         {/* STEP 6: CONSOLIDATED REPORT */}

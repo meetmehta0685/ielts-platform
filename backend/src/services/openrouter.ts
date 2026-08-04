@@ -69,8 +69,8 @@ export class OpenRouterService {
   static async streamCompletion(
     messages: ChatMessage[],
     onToken: (token: string) => void,
-    onEnd: () => void,
-    onError: (err: any) => void,
+    onEnd: () => void | Promise<void>,
+    onError: (err: any) => void | Promise<void>,
     model = "openrouter/optimus-alpha",
     attemptedModels: string[] = []
   ): Promise<void> {
@@ -136,7 +136,7 @@ export class OpenRouterService {
         } catch (e) {}
       }
 
-      onEnd();
+      await onEnd();
     } catch (error: any) {
       console.error("[OpenRouter Stream Error]:", error);
       const nextAttempted = [...attemptedModels, model];
@@ -150,7 +150,7 @@ export class OpenRouterService {
         console.log(`[Info] Retrying stream with fallback model ${nextModel}...`);
         return this.streamCompletion(messages, onToken, onEnd, onError, nextModel, nextAttempted);
       }
-      onError(error);
+      await onError(error);
     }
   }
 }

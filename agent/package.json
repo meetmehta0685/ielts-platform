@@ -1,0 +1,25 @@
+{
+  "name": "ielts-speaking-examiner-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx src/main.ts dev",
+    "start": "tsx src/main.ts start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@livekit/agents": "^1.6.1",
+    "@livekit/rtc-node": "^0.13.33",
+    "dotenv": "^17.4.2",
+    "tsx": "^4.19.4",
+    "typescript": "^6.0.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3"
+  }
+}

@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import { OAUTH_NEXT_PATH_KEY } from "@/lib/auth-redirect";
 import { toast } from "sonner";
 import { Loader2, Mail, Lock, User } from "lucide-react";
 
@@ -88,7 +89,7 @@ export function SignupForm() {
         if (profileError) {
           console.warn("Profile creation warning (this is fine if database triggers handled it):", profileError.message);
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.warn("Client-side profile creation failed, relying on DB trigger:", err);
       }
 
@@ -97,8 +98,8 @@ export function SignupForm() {
       // 3. Redirect user to complete-profile page
       router.push("/complete-profile");
       router.refresh();
-    } catch (error: any) {
-      toast.error(error.message || "Failed to sign up. Please try again.");
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : "Failed to sign up. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -107,15 +108,19 @@ export function SignupForm() {
   const handleGoogleLogin = async () => {
     setIsLoading(true);
     try {
+      const callbackUrl = new URL("/auth/callback", window.location.origin);
+      window.sessionStorage.setItem(OAUTH_NEXT_PATH_KEY, "/complete-profile");
+
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
+          redirectTo: callbackUrl.toString(),
         },
       });
       if (error) throw error;
-    } catch (error: any) {
-      toast.error(error.message || "Failed to initiate Google sign-up.");
+    } catch (error: unknown) {
+      window.sessionStorage.removeItem(OAUTH_NEXT_PATH_KEY);
+      toast.error(error instanceof Error ? error.message : "Failed to initiate Google sign-up.");
       setIsLoading(false);
     }
   };

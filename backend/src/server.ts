@@ -12,6 +12,7 @@ import speakingRoutes from "./routes/speakingRoutes";
 import testRoutes from "./routes/testRoutes";
 import plannerRoutes from "./routes/plannerRoutes";
 import dashboardRoutes from "./routes/dashboardRoutes";
+import simulatorRoutes from "./routes/simulatorRoutes";
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -32,6 +33,7 @@ app.use("/api/speaking", speakingRoutes);
 app.use("/api/test", testRoutes);
 app.use("/api/planner", plannerRoutes);
 app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/simulator", simulatorRoutes);
 
 // Health Check
 app.get("/", (req, res) => {
