@@ -70,12 +70,15 @@ export default function SpeakingLiveKitRoom({
 }: SpeakingLiveKitRoomProps) {
   const [details, setDetails] = useState<RoomDetails | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
+  const [isRetrying, setIsRetrying] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
 
     const createRoom = async () => {
       try {
+        setRequestError(null);
         const response = await fetch(`${backendUrl}/api/simulator/speaking/session`, {
           method: "POST",
           headers: {
@@ -91,7 +94,15 @@ export default function SpeakingLiveKitRoom({
 
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
-          throw new Error(data.error || "Unable to create the AI speaking room.");
+          const serverError = typeof data.error === "string" ? data.error : "";
+          const isLiveKitConfigurationError =
+            data.code === "LIVEKIT_NOT_CONFIGURED" || /livekit is not configured/i.test(serverError);
+
+          throw new Error(
+            isLiveKitConfigurationError
+              ? "The AI examiner is temporarily unavailable. Please try again later."
+              : serverError || "Unable to create the AI speaking room.",
+          );
         }
 
         setDetails(data as RoomDetails);
@@ -100,12 +111,14 @@ export default function SpeakingLiveKitRoom({
           const message = error instanceof Error ? error.message : "Unable to create the AI speaking room.";
           setRequestError(message);
         }
+      } finally {
+        setIsRetrying(false);
       }
     };
 
     createRoom();
     return () => controller.abort();
-  }, [attemptId, authToken, backendUrl, candidateName]);
+  }, [attemptId, authToken, backendUrl, candidateName, retryNonce]);
 
   if (requestError) {
     return (
@@ -117,6 +130,19 @@ export default function SpeakingLiveKitRoom({
           <p className="text-xs text-slate-500">
             Confirm the backend is running and the LiveKit credentials are configured.
           </p>
+          <Button
+            type="button"
+            onClick={() => {
+              setDetails(null);
+              setIsRetrying(true);
+              setRetryNonce((value) => value + 1);
+            }}
+            disabled={isRetrying}
+            className="mx-auto gap-2 bg-amber-400 font-bold text-slate-950 hover:bg-amber-300"
+          >
+            {isRetrying && <Loader2 className="h-4 w-4 animate-spin" />}
+            {isRetrying ? "Retrying…" : "Try again"}
+          </Button>
         </div>
       </div>
     );

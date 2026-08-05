@@ -12,13 +12,32 @@ const speakingSessionSchema = z.object({
   candidate_name: z.string().trim().min(1).max(120).optional(),
 });
 
+class LiveKitConfigurationError extends Error {
+  readonly code = "LIVEKIT_NOT_CONFIGURED";
+
+  constructor() {
+    super("LiveKit is not configured on the server.");
+    this.name = "LiveKitConfigurationError";
+  }
+}
+
 function getLiveKitConfig() {
-  const url = process.env.LIVEKIT_URL;
-  const apiKey = process.env.LIVEKIT_API_KEY;
-  const apiSecret = process.env.LIVEKIT_API_SECRET;
+  const url = process.env.LIVEKIT_URL?.trim();
+  const apiKey = process.env.LIVEKIT_API_KEY?.trim();
+  const apiSecret = process.env.LIVEKIT_API_SECRET?.trim();
+  const missing = [
+    !url && "LIVEKIT_URL",
+    !apiKey && "LIVEKIT_API_KEY",
+    !apiSecret && "LIVEKIT_API_SECRET",
+  ].filter((key): key is string => Boolean(key));
+
+  if (missing.length > 0) {
+    console.error(`[Simulator] Missing LiveKit environment variables: ${missing.join(", ")}`);
+    throw new LiveKitConfigurationError();
+  }
 
   if (!url || !apiKey || !apiSecret) {
-    throw new Error("LiveKit is not configured on the server.");
+    throw new LiveKitConfigurationError();
   }
 
   return { url, apiKey, apiSecret };
@@ -141,6 +160,15 @@ export class SimulatorController {
       });
     } catch (error: any) {
       console.error("[Simulator] Create Speaking LiveKit session error:", error);
+
+      if (error instanceof LiveKitConfigurationError) {
+        res.status(503).json({
+          code: error.code,
+          error: "The AI examiner is temporarily unavailable. Please try again later.",
+        });
+        return;
+      }
+
       res.status(500).json({ error: error.message || "Failed to create the speaking exam room." });
     }
   }

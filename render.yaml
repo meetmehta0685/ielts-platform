@@ -22,6 +22,9 @@ services:
         sync: false
       - key: ELEVENLABS_VOICE_ID
         sync: false
+      # Set the same LiveKit project credentials on both the web service and worker.
+      # `sync: false` values must be entered in Render's service settings for an
+      # existing Blueprint; syncing this file does not prompt for them again.
       - key: LIVEKIT_URL
         sync: false
       - key: LIVEKIT_API_KEY
