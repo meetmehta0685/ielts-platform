@@ -1,8 +1,7 @@
 "use client";
 
-import { MessageSquare, Plus, Menu, X, Brain } from "lucide-react";
+import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 
 interface ChatSession {
@@ -20,8 +19,25 @@ interface ChatSidebarProps {
   isOpen: boolean;
   onToggleOpen: () => void;
   isCreating: boolean;
+  isLoading?: boolean;
+  isError?: boolean;
+  onRetry?: () => void;
 }
 
+const shortDate = (iso: string) => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const today = new Date();
+  if (d.toDateString() === today.toDateString()) {
+    return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  }
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+};
+
+/**
+ * The conversation list, on the white sheet beside the thread (not a second dark sidebar). On a
+ * phone it slides over the thread from the left and closes once a conversation is picked.
+ */
 export function ChatSidebar({
   sessions,
   activeSessionId,
@@ -30,107 +46,87 @@ export function ChatSidebar({
   isOpen,
   onToggleOpen,
   isCreating,
+  isLoading,
+  isError,
+  onRetry,
 }: ChatSidebarProps) {
   return (
-    <>
-      {/* Mobile Menu Trigger */}
-      <div className="absolute top-4 left-4 z-20 md:hidden">
-        <Button variant="outline" size="icon" onClick={onToggleOpen} className="h-9 w-9 bg-background/90 shadow-sm">
-          {isOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+    <aside
+      aria-label="Conversations"
+      data-open={isOpen}
+      className={cn(
+        "flex w-full flex-col bg-sheet",
+        // phone: an overlay sheet that slides in over the thread
+        "fixed inset-x-0 top-12 bottom-0 z-20 transition-[opacity,transform] duration-[var(--duration-fast)] ease-[var(--ease-smooth-out)] data-[open=false]:pointer-events-none data-[open=false]:-translate-x-3 data-[open=false]:opacity-0 motion-reduce:transition-none",
+        // desktop: a fixed column inside the sheet, split from the thread by one rule
+        "lg:static lg:z-auto lg:w-[264px] lg:shrink-0 lg:translate-x-0 lg:border-r lg:border-border lg:opacity-100 lg:transition-none lg:data-[open=false]:pointer-events-auto lg:data-[open=false]:translate-x-0 lg:data-[open=false]:opacity-100"
+      )}
+    >
+      <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border px-4 lg:px-5">
+        <h2 className="text-[15px] font-semibold text-ink">Conversations</h2>
+        <Button onClick={onCreateSession} disabled={isCreating} variant="secondary" size="sm">
+          <Plus />
+          New
         </Button>
       </div>
 
-      {/* Sidebar Container */}
-      <aside
-        className={cn(
-          "fixed inset-y-0 left-0 z-10 flex w-72 flex-col border-r border-muted/50 bg-muted/20 transition-transform duration-300 md:static md:translate-x-0",
-          isOpen ? "translate-x-0" : "-translate-x-full"
-        )}
-      >
-        {/* Header */}
-        <div className="flex h-16 items-center justify-between border-b border-muted/50 px-4 shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-primary to-primary/80 text-primary-foreground shadow-sm">
-              <Brain className="h-5 w-5" />
-            </div>
-            <div>
-              <span className="font-extrabold text-sm text-foreground tracking-tight block leading-none">IELTS Prep</span>
-              <span className="text-[10px] text-muted-foreground font-bold">AI Mentor Chat</span>
-            </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pt-2 pb-4 lg:px-3">
+        {isLoading ? (
+          <ul className="flex flex-col gap-1 px-2 pt-1" aria-busy>
+            {[0, 1, 2].map((i) => (
+              <li key={i} className="py-2">
+                <div className="t-skel h-4 w-4/5" />
+                <div className="t-skel mt-2 h-3 w-1/4" />
+              </li>
+            ))}
+          </ul>
+        ) : isError ? (
+          <div className="px-3 pt-2 text-[15px] leading-relaxed">
+            <p className="text-ink">Your conversations did not load.</p>
+            <button
+              type="button"
+              onClick={onRetry}
+              className="mt-1 text-sm text-ink underline decoration-1 underline-offset-4 hover:decoration-2"
+            >
+              Try again
+            </button>
           </div>
-          <Button variant="ghost" size="icon" className="md:hidden" onClick={onToggleOpen}>
-            <X className="h-4 w-4" />
-          </Button>
-        </div>
-
-        {/* Action Button */}
-        <div className="p-4 shrink-0">
-          <Button
-            onClick={onCreateSession}
-            disabled={isCreating}
-            className="w-full justify-start gap-2 h-10 shadow-sm text-sm font-semibold rounded-xl bg-gradient-to-r from-primary to-primary/90 text-primary-foreground transition-all duration-200 hover:shadow-md hover:shadow-primary/5 active:scale-[0.98]"
-          >
-            <Plus className="h-4 w-4" />
-            New Conversation
-          </Button>
-        </div>
-
-        {/* Sessions Scrollable History */}
-        <ScrollArea className="flex-1 px-3 pb-4">
-          <div className="space-y-1">
-            <h2 className="px-3 py-2 text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-              Recent Chats
-            </h2>
-            {sessions.length === 0 ? (
-              <p className="px-3 py-6 text-xs text-muted-foreground text-center bg-muted/5 rounded-xl border border-dashed border-muted/50 my-2">
-                No conversation history.
-              </p>
-            ) : (
-              sessions.map((session) => {
-                const isActive = session.id === activeSessionId;
-                return (
+        ) : sessions.length === 0 ? (
+          <p className="px-3 pt-2 text-[15px] leading-relaxed text-soft">
+            No conversations yet. Your first question starts one.
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-0.5">
+            {sessions.map((session) => {
+              const isActive = session.id === activeSessionId;
+              return (
+                <li key={session.id}>
                   <button
-                    key={session.id}
+                    type="button"
+                    aria-current={isActive ? "true" : undefined}
                     onClick={() => {
                       onSelectSession(session.id);
                       // On mobile, close sidebar after selecting session
-                      if (window.innerWidth < 768) {
+                      if (isOpen && window.innerWidth < 1024) {
                         onToggleOpen();
                       }
                     }}
                     className={cn(
-                      "group flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-all select-none hover:bg-muted/70",
-                      isActive
-                        ? "bg-primary/8 text-primary shadow-xs border border-primary/10"
-                        : "text-muted-foreground hover:text-foreground border border-transparent"
+                      "flex min-h-11 w-full items-baseline justify-between gap-3 rounded-[10px] px-3 py-2.5 text-left transition-colors duration-[var(--duration-quick)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-teal",
+                      isActive ? "bg-panel-strong" : "hover:bg-panel"
                     )}
                   >
-                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                      <MessageSquare className={cn("h-4 w-4 shrink-0 transition-transform group-hover:scale-105", isActive ? "text-primary" : "text-muted-foreground")} />
-                      <span className="truncate pr-2">{session.title}</span>
-                    </div>
-                    {isActive && (
-                      <span className="relative flex h-2 w-2 shrink-0">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
-                      </span>
-                    )}
+                    <span className={cn("truncate text-[15px] text-ink", isActive && "font-medium")}>
+                      {session.title || "Untitled conversation"}
+                    </span>
+                    <span className="tabular shrink-0 text-[13px] text-soft">{shortDate(session.updated_at)}</span>
                   </button>
-                );
-              })
-            )}
-          </div>
-        </ScrollArea>
-      </aside>
-
-
-      {/* Backdrop for mobile overlays */}
-      {isOpen && (
-        <div
-          onClick={onToggleOpen}
-          className="fixed inset-0 z-5 bg-background/50 backdrop-blur-xs md:hidden"
-        />
-      )}
-    </>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </aside>
   );
 }

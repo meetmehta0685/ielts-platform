@@ -6,11 +6,14 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { toast } from "sonner";
 import { readSseEvents } from "@/lib/sse";
-import { Loader2, PenTool, CheckCircle, ChevronRight, AlertTriangle, ArrowLeft, RefreshCw, FileText, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
+import { AppShell, PageColumn, Panel } from "@/components/app/app-shell";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { ThinkingStatus, stageFromStream } from "@/components/writing/thinking-status";
+import { CriteriaTable, NextSteps, OverallBand } from "@/components/writing/band-report";
+import { CorrectionList, MarkedEssay, type Correction } from "@/components/writing/marked-essay";
+import { cn } from "@/lib/utils";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -25,11 +28,38 @@ const SAMPLE_PROMPTS = {
   ]
 };
 
-interface Correction {
-  original: string;
-  correction: string;
-  explanation: string;
-}
+/** Exam-paper wording for each task, as printed on the IELTS question paper. */
+const PAPER = {
+  task1: {
+    label: "Writing Task 1",
+    minutes: 20,
+    minWords: 150,
+    intro: "You should spend about 20 minutes on this task.",
+    outro: "Write at least 150 words.",
+  },
+  task2: {
+    label: "Writing Task 2",
+    minutes: 40,
+    minWords: 250,
+    intro: "You should spend about 40 minutes on this task. Write about the following topic:",
+    outro:
+      "Give reasons for your answer and include any relevant examples from your own knowledge or experience. Write at least 250 words.",
+  },
+} as const;
+
+/** Marker stages, keyed by the JSON field the model is writing when it reaches each one. */
+const MARKING_STAGES: [string, string][] = [
+  ["band_score", "Settling the overall band"],
+  ["task_response", "Scoring task response"],
+  ["coherence_cohesion", "Checking coherence and cohesion"],
+  ["lexical_resource", "Weighing your vocabulary"],
+  ["grammar_accuracy", "Checking grammar sentence by sentence"],
+  ["corrections", "Marking sentences to fix"],
+  ["vocabulary_suggestions", "Finding stronger words"],
+  ["improved_essay", "Writing an improved version"],
+  ["improvements", "Choosing your next steps"],
+];
+const MARKING_WARMUP = ["Reading your essay", "Reading the question", "Comparing against the band descriptors"];
 
 interface VocabularySuggestion {
   original: string;
@@ -50,85 +80,7 @@ interface EvaluationResult {
   improvements: string[];
 }
 
-function getAnnotatedEssay(essayText: string, corrections: Correction[]) {
-  if (!corrections || corrections.length === 0) {
-    return <p className="whitespace-pre-wrap">{essayText}</p>;
-  }
-
-  interface Match {
-    start: number;
-    end: number;
-    original: string;
-    correction: string;
-    explanation: string;
-  }
-
-  const matches: Match[] = [];
-
-  corrections.forEach((corr) => {
-    if (!corr.original || corr.original.trim() === "") return;
-    
-    let idx = essayText.indexOf(corr.original);
-    while (idx !== -1) {
-      matches.push({
-        start: idx,
-        end: idx + corr.original.length,
-        original: corr.original,
-        correction: corr.correction,
-        explanation: corr.explanation
-      });
-      idx = essayText.indexOf(corr.original, idx + 1);
-    }
-  });
-
-  matches.sort((a, b) => {
-    if (a.start !== b.start) {
-      return a.start - b.start;
-    }
-    return (b.end - b.start) - (a.end - a.start);
-  });
-
-  const nonOverlapping: Match[] = [];
-  let lastEnd = 0;
-  for (const match of matches) {
-    if (match.start >= lastEnd) {
-      nonOverlapping.push(match);
-      lastEnd = match.end;
-    }
-  }
-
-  const nodes: React.ReactNode[] = [];
-  let currentIdx = 0;
-
-  nonOverlapping.forEach((match, i) => {
-    if (match.start > currentIdx) {
-      nodes.push(essayText.slice(currentIdx, match.start));
-    }
-
-    nodes.push(
-      <span key={`corr-${i}`} className="relative group inline-block mx-1">
-        <span className="line-through bg-red-100/90 hover:bg-red-200 text-red-700 px-1 py-0.5 rounded cursor-help font-medium transition-all">
-          {match.original}
-        </span>
-        <span className="bg-emerald-100/90 hover:bg-emerald-200 text-emerald-800 px-1 py-0.5 rounded font-semibold cursor-help transition-all ml-1">
-          {match.correction}
-        </span>
-        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-slate-900 text-white text-xs rounded-xl shadow-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50 leading-relaxed font-sans font-normal normal-case">
-          <strong className="text-amber-400 block mb-1">AI Feedback:</strong>
-          {match.explanation}
-        </span>
-      </span>
-    );
-
-    currentIdx = match.end;
-  });
-
-  if (currentIdx < essayText.length) {
-    nodes.push(essayText.slice(currentIdx));
-  }
-
-  return <div className="whitespace-pre-wrap leading-relaxed">{nodes}</div>;
-}
+const ESSAY_SIZE = { sm: "text-[15px]", base: "text-[17px]", lg: "text-[19px]" } as const;
 
 function WritingPageContent() {
   const router = useRouter();
@@ -148,7 +100,7 @@ function WritingPageContent() {
   const [taskType, setTaskType] = useState<"task1" | "task2">("task2");
   const [prompt, setPrompt] = useState("");
   const [essay, setEssay] = useState("");
-  
+
   // Word counter
   const [wordCount, setWordCount] = useState(0);
 
@@ -157,6 +109,7 @@ function WritingPageContent() {
   const [result, setResult] = useState<EvaluationResult | null>(null);
   const [streamingText, setStreamingText] = useState("");
   const [viewMode, setViewMode] = useState<"annotated" | "original">("annotated");
+  const [gradeError, setGradeError] = useState<string | null>(null);
 
   // Timer states
   const [timeLeft, setTimeLeft] = useState(2400); // Default Task 2: 40 mins
@@ -173,7 +126,11 @@ function WritingPageContent() {
         } else {
           setToken(session.access_token);
           if (session.user) {
-            setCandidateName(session.user.email?.split("@")[0] || "Candidate");
+            setCandidateName(
+              (session.user.user_metadata?.full_name as string | undefined) ||
+                session.user.email?.split("@")[0] ||
+                "Candidate"
+            );
             setCandidateId(`ielts-${session.user.id.substring(0, 8)}`);
           }
         }
@@ -189,7 +146,7 @@ function WritingPageContent() {
   // Load past attempt if provided
   useEffect(() => {
     if (!token) return;
-    
+
     const attemptId = searchParams.get("attempt_id");
     if (!attemptId) return;
 
@@ -220,7 +177,7 @@ function WritingPageContent() {
           improved_essay: attemptData.feedback_json?.improved_essay || "",
           improvements: attemptData.feedback_json?.improvements || [],
         });
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error("Failed to load writing attempt:", err);
         toast.error("Failed to load writing attempt details.");
       }
@@ -281,6 +238,7 @@ function WritingPageContent() {
     setIsGrading(true);
     setResult(null);
     setStreamingText("");
+    setGradeError(null);
     router.replace("/writing");
 
     try {
@@ -300,6 +258,7 @@ function WritingPageContent() {
       let accumulated = "";
       let finalResult: EvaluationResult | null = null;
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await readSseEvents<{ token?: string; done?: boolean; id?: string; result?: any }>(response, (data) => {
         if (data.token) {
           accumulated += data.token;
@@ -326,8 +285,10 @@ function WritingPageContent() {
       } else {
         throw new Error("Failed to receive completed evaluation from server.");
       }
-    } catch (err: any) {
-      toast.error(err.message || "An unexpected error occurred while analyzing your essay.");
+    } catch (err: unknown) {
+      const message = err instanceof Error && err.message ? err.message : "An unexpected error occurred while analyzing your essay.";
+      setGradeError(message);
+      toast.error(message);
     } finally {
       setIsGrading(false);
       setStreamingText("");
@@ -338,493 +299,358 @@ function WritingPageContent() {
     evaluateRef.current = handleEvaluate;
   });
 
-  const getScoreColor = (score: number) => {
-    if (score >= 7.5) return "text-emerald-600 bg-emerald-50 border-emerald-200 dark:text-emerald-400 dark:bg-emerald-500/10";
-    if (score >= 6.0) return "text-blue-600 bg-blue-50 border-blue-200 dark:text-blue-400 dark:bg-blue-500/10";
-    if (score >= 5.0) return "text-amber-600 bg-amber-50 border-amber-200 dark:text-amber-400 dark:bg-amber-500/10";
-    return "text-rose-600 bg-rose-50 border-rose-200 dark:text-rose-400 dark:bg-rose-500/10";
-  };
-
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
     const s = Math.floor(seconds % 60);
     return `${m}:${s < 10 ? "0" : ""}${s}`;
   };
 
-  const getTextSizeClass = () => {
-    if (fontScale === "sm") return "text-xs";
-    if (fontScale === "lg") return "text-base";
-    return "text-sm";
-  };
+  if (isAuthLoading) return <WritingSkeleton />;
 
-  if (isAuthLoading) {
+  const paper = PAPER[taskType];
+  const taskName = taskType === "task1" ? "Task 1" : "Task 2";
+
+  /* ---------- Result: the band, the criteria, then exactly what to fix ---------- */
+  if (result) {
+    const corrections = result.corrections ?? [];
+    const vocab = result.vocabulary_suggestions ?? [];
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <div className="text-center space-y-4">
-          <Loader2 className="h-10 w-10 animate-spin text-primary mx-auto" />
-          <p className="text-sm text-muted-foreground">Verifying access...</p>
-        </div>
-      </div>
+      <AppShell title="Writing">
+        <PageColumn
+          title={`Your ${taskName} essay, marked.`}
+          lead={`${corrections.length} ${corrections.length === 1 ? "sentence" : "sentences"} to fix and ${vocab.length} ${vocab.length === 1 ? "word" : "words"} to upgrade, ${wordCount} words written.`}
+          actions={
+            <Button onClick={() => setResult(null)} variant="secondary">
+              Write another essay
+            </Button>
+          }
+        >
+          <div className="flex flex-col gap-4 lg:grid lg:grid-cols-12 lg:items-start">
+            {/* Left rail: the band, then what to do */}
+            <div className="contents lg:col-span-3 lg:flex lg:flex-col lg:gap-4">
+              <div className="order-1 lg:order-none">
+                <OverallBand band={result.band_score} caption={`${taskName}, ${paper.minWords}-word minimum. The four criteria count equally.`} />
+              </div>
+              <div className="order-3 lg:order-none">
+                <Panel title="What to fix next">
+                  <NextSteps items={result.improvements ?? []} empty="The marker gave no next steps for this essay." />
+                </Panel>
+              </div>
+              <div className="order-6 lg:order-none">
+                <Panel title="Stronger words" aside={vocab.length || undefined}>
+                  {vocab.length ? (
+                    <ul className="flex flex-col">
+                      {vocab.map((voc, idx) => (
+                        <li key={idx} className="border-b border-border py-3 first:pt-0 last:border-b-0 last:pb-0">
+                          <p className="text-[15px] leading-snug">
+                            <del className="text-soft decoration-bad decoration-[1.5px]">{voc.original}</del>
+                            <span className="text-soft"> to </span>
+                            <ins className="font-medium text-ink no-underline">{voc.suggestion}</ins>
+                          </p>
+                          {voc.explanation && <p className="mt-1 text-sm leading-normal text-soft">{voc.explanation}</p>}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-[15px] leading-relaxed text-soft">No repeated or weak words were flagged.</p>
+                  )}
+                </Panel>
+              </div>
+            </div>
+
+            {/* Main column: criteria, the essay marked up, every correction, the improved version */}
+            <div className="contents lg:col-span-9 lg:flex lg:flex-col lg:gap-4">
+              <div className="order-2 lg:order-none">
+                <CriteriaTable
+                  aside="Out of 9"
+                  rows={[
+                    { label: taskType === "task1" ? "Task achievement" : "Task response", band: result.task_response },
+                    { label: "Coherence and cohesion", band: result.coherence_cohesion },
+                    { label: "Lexical resource", band: result.lexical_resource },
+                    { label: "Grammatical range and accuracy", band: result.grammar_accuracy },
+                  ]}
+                />
+              </div>
+
+              <section className="order-4 rounded-2xl border border-border bg-sheet p-5 sm:p-8 lg:order-none">
+                <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 className="text-[15px] font-semibold text-ink">Your essay</h2>
+                    <p className="mt-1 text-sm text-soft">
+                      {viewMode === "annotated"
+                        ? "Struck words are the marker's; the shaded words replace them. Hover one for the reason."
+                        : "Exactly what you wrote."}
+                    </p>
+                  </div>
+                  <SegmentedControl
+                    size="sm"
+                    label="Essay view"
+                    value={viewMode}
+                    onChange={setViewMode}
+                    options={[
+                      { value: "annotated", label: "Marked" },
+                      { value: "original", label: "Original" },
+                    ]}
+                  />
+                </div>
+                <div className="max-w-[70ch] text-[17px] leading-[1.75] text-ink">
+                  {essay.trim() ? (
+                    viewMode === "annotated" ? (
+                      <MarkedEssay essayText={essay} corrections={corrections} />
+                    ) : (
+                      <p className="whitespace-pre-wrap">{essay}</p>
+                    )
+                  ) : (
+                    <p className="text-soft">—</p>
+                  )}
+                </div>
+              </section>
+
+              <div className="order-5 lg:order-none">
+                <Panel title="Sentences to fix" aside={corrections.length}>
+                  <CorrectionList corrections={corrections} />
+                </Panel>
+              </div>
+
+              <section className="order-7 rounded-2xl bg-panel p-5 sm:p-8 lg:order-none">
+                <h2 className="text-[15px] font-semibold text-ink">An improved version</h2>
+                <p className="mt-1 mb-5 text-sm text-soft">Your ideas, rewritten by the marker. Compare it paragraph by paragraph.</p>
+                {result.improved_essay ? (
+                  <p className="max-w-[70ch] whitespace-pre-wrap text-[17px] leading-[1.75] text-ink select-text">{result.improved_essay}</p>
+                ) : (
+                  <p className="text-[15px] text-soft">The marker did not return an improved version this time.</p>
+                )}
+              </section>
+            </div>
+          </div>
+        </PageColumn>
+      </AppShell>
     );
   }
 
+  /* ---------- Before and during marking: question paper beside the answer sheet ---------- */
+  const target = paper.minWords;
+  const reached = wordCount >= target;
+  const lowTime = isTimerActive && timeLeft <= 60;
+  const marking = stageFromStream(streamingText, MARKING_STAGES, MARKING_WARMUP);
+
   return (
-    <div className="min-h-screen bg-muted/20 flex flex-col justify-between" style={{
-      "--scrollbar-thumb": "rgba(100, 116, 139, 0.4)",
-      "--scrollbar-track": "rgba(241, 245, 249, 0.5)"
-    } as any}>
-      {/* Top Header */}
-      <header className="sticky top-0 z-10 border-b border-muted/50 bg-[#333f48] text-white px-6 h-16 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
-          <a href="/dashboard">
-            <Button variant="ghost" size="icon" className="h-8 w-8 mr-1 text-white hover:bg-white/10">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </a>
-          <span className="font-bold tracking-tight text-white">IELTS CBT Practice - Writing</span>
-        </div>
+    <AppShell title="Writing">
+      <PageColumn
+        title={`Write your ${taskName} essay.`}
+        lead={`At least ${target} words in ${paper.minutes} minutes. You get a band for each criterion and every sentence to fix.`}
+        actions={
+          <SegmentedControl
+            label="Writing task"
+            value={taskType}
+            disabled={isGrading}
+            onChange={(next) => {
+              setTaskType(next);
+              setPrompt("");
+            }}
+            options={[
+              { value: "task1", label: "Task 1" },
+              { value: "task2", label: "Task 2" },
+            ]}
+          />
+        }
+      >
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:items-start">
+          {/* Question paper */}
+          <div className="flex flex-col gap-4 lg:sticky lg:top-6 lg:col-span-5">
+            <section className="rounded-2xl bg-panel p-5 sm:p-6">
+              <div className="mb-4 flex items-baseline justify-between gap-4">
+                <h2 className="text-[15px] font-semibold text-ink">{paper.label}</h2>
+                <span className="tabular text-sm text-soft">{paper.minutes} minutes</span>
+              </div>
+              <p className="text-[15px] leading-relaxed text-soft">{paper.intro}</p>
+              <div key={prompt} className="t-swap my-5 border-l-2 border-ink py-1 pl-4">
+                {prompt ? (
+                  <p className="text-[17px] leading-relaxed text-ink">{prompt}</p>
+                ) : (
+                  <p className="text-[17px] leading-relaxed text-soft">Choose a question below, or paste your own.</p>
+                )}
+              </div>
+              <p className="text-[15px] leading-relaxed text-soft">{paper.outro}</p>
+            </section>
 
-        {/* Center: CBT Timer */}
-        {!result && (
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2 bg-[#222a30] text-white px-4 py-1.5 rounded-md border border-white/10 text-sm font-bold font-mono">
-              <Clock className="h-4 w-4 text-[#ffc72c] animate-pulse" />
-              <span>{isTimerHidden ? "--:--" : formatTime(timeLeft)}</span>
-            </div>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => setIsTimerHidden(!isTimerHidden)}
-              className="text-xs h-8 border-white/20 text-white bg-transparent hover:bg-white/10 hover:text-white"
-            >
-              {isTimerHidden ? "Show Time" : "Hide Time"}
-            </Button>
+            {!isGrading && (
+              <Panel title="Choose a question">
+                <ul className="flex flex-col gap-1.5">
+                  {SAMPLE_PROMPTS[taskType].map((sample, idx) => {
+                    const selected = prompt === sample;
+                    return (
+                      <li key={idx}>
+                        <button
+                          type="button"
+                          aria-pressed={selected}
+                          onClick={() => handleSelectSample(sample)}
+                          className={cn(
+                            "block w-full rounded-xl px-3.5 py-3 text-left text-[15px] leading-snug transition-colors duration-[var(--duration-quick)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal",
+                            selected ? "bg-sheet text-ink shadow-[0_0_0_1px_var(--border)]" : "text-soft hover:bg-panel-strong hover:text-ink"
+                          )}
+                        >
+                          <span className="line-clamp-2">{sample}</span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <label htmlFor="custom-prompt" className="mt-5 mb-2 block text-sm font-medium text-ink">
+                  Or paste your own question
+                </label>
+                <Textarea
+                  id="custom-prompt"
+                  placeholder="Paste the task wording here"
+                  value={SAMPLE_PROMPTS[taskType].includes(prompt) ? "" : prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  className="min-h-[96px]"
+                  required
+                />
+              </Panel>
+            )}
           </div>
-        )}
 
-        <div className="flex items-center gap-4">
-          {/* Font Resizing Controls */}
-          <div className="flex items-center gap-1 bg-[#222a30] rounded-md p-1 border border-white/10">
-            <Button 
-              size="icon" 
-              variant="ghost" 
-              onClick={() => setFontScale("sm")}
-              className={`h-7 w-7 text-xs ${fontScale === "sm" ? "bg-primary text-white" : "text-white/70"}`}
-            >
-              A-
-            </Button>
-            <Button 
-              size="icon" 
-              variant="ghost" 
-              onClick={() => setFontScale("base")}
-              className={`h-7 w-7 text-xs ${fontScale === "base" ? "bg-primary text-white" : "text-white/70"}`}
-            >
-              A
-            </Button>
-            <Button 
-              size="icon" 
-              variant="ghost" 
-              onClick={() => setFontScale("lg")}
-              className={`h-7 w-7 text-xs ${fontScale === "lg" ? "bg-primary text-white" : "text-white/70"}`}
-            >
-              A+
-            </Button>
-          </div>
-
-          {/* Candidate Info */}
-          <div className="hidden md:flex flex-col items-end text-xs">
-            <span className="font-bold text-white/95 capitalize">{candidateName}</span>
-            <span className="text-white/60 font-mono text-[10px]">{candidateId}</span>
-          </div>
-
-          <a href="/dashboard" className="text-xs font-bold text-[#ffc72c] hover:underline">
-            Exit
-          </a>
-        </div>
-      </header>
-
-      {/* Main Workspace split */}
-      <div className="flex-1 flex overflow-hidden">
-        {!result ? (
-          <div className="flex flex-1 overflow-hidden">
-            {/* Left Column: Scrollable Prompts and Instructions */}
-            <div className="flex-1 overflow-y-auto px-8 py-8 bg-background border-r border-muted/50" style={{
-              scrollbarColor: "var(--scrollbar-thumb) var(--scrollbar-track)",
-              scrollbarWidth: "thin"
-            }}>
-              <div className="max-w-2xl mx-auto space-y-6">
-                <div>
-                  <h1 className="text-xl font-bold flex items-center gap-2">
-                    <PenTool className="h-5 w-5 text-primary" />
-                    IELTS Writing {taskType === "task1" ? "Task 1" : "Task 2"}
-                  </h1>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {taskType === "task1" 
-                      ? "Academic: Describe a graph, chart, table, or write a letter (minimum 150 words)."
-                      : "Write an opinion, discussion, or problem-solution essay (minimum 250 words)."
-                    }
+          {/* Answer sheet */}
+          <div className="flex flex-col gap-4 lg:col-span-7">
+            <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3 px-1">
+              <div className="flex items-end gap-3">
+                <p
+                  className={cn(
+                    "tabular text-[40px] leading-none text-ink",
+                    (isTimerHidden || !prompt) && "text-soft",
+                    lowTime && "text-bad"
+                  )}
+                  aria-label={isTimerHidden ? "Time hidden" : `${formatTime(timeLeft)} left`}
+                >
+                  {isTimerHidden ? "—:—" : formatTime(timeLeft)}
+                </p>
+                <div className="pb-0.5">
+                  <p className="text-sm text-soft">
+                    {isGrading ? "Paused for marking" : prompt ? "left" : "Starts with a question"}
                   </p>
-                </div>
-
-                {/* Task selection */}
-                <div className="flex rounded-md border border-muted p-0.5 text-xs bg-muted/20 w-fit">
                   <button
-                    onClick={() => { setTaskType("task1"); setPrompt(""); }}
-                    className={`px-3 py-1.5 rounded-sm font-semibold transition-all cursor-pointer ${
-                      taskType === "task1" ? "bg-background shadow-xs text-primary" : "text-muted-foreground"
-                    }`}
+                    type="button"
+                    onClick={() => setIsTimerHidden(!isTimerHidden)}
+                    className="text-sm text-ink underline decoration-1 underline-offset-4 hover:decoration-2"
                   >
-                    Task 1 (20 Mins)
-                  </button>
-                  <button
-                    onClick={() => { setTaskType("task2"); setPrompt(""); }}
-                    className={`px-3 py-1.5 rounded-sm font-semibold transition-all cursor-pointer ${
-                      taskType === "task2" ? "bg-background shadow-xs text-primary" : "text-muted-foreground"
-                    }`}
-                  >
-                    Task 2 (40 Mins)
+                    {isTimerHidden ? "Show time" : "Hide time"}
                   </button>
                 </div>
-
-                {/* Sample prompts */}
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">
-                    Sample Prompts
-                  </label>
-                  <div className="flex flex-col gap-2">
-                    {SAMPLE_PROMPTS[taskType].map((sample, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => handleSelectSample(sample)}
-                        className="text-left text-xs p-3 rounded-lg border border-muted hover:border-primary/30 hover:bg-primary/5 transition-all text-foreground block leading-relaxed"
-                      >
-                        {sample}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Dynamic Prompt Instruction block */}
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">
-                    Prompt Input / Details
-                  </label>
-                  <Textarea
-                    placeholder="Select a sample prompt above or paste custom topic instructions here..."
-                    value={prompt}
-                    onChange={(e) => setPrompt(e.target.value)}
-                    className="min-h-[100px] text-xs leading-relaxed"
-                    required
+              </div>
+              <div className="min-w-[180px] flex-1 sm:max-w-[240px]">
+                <p className="mb-2 text-right text-sm text-soft">
+                  <span className="tabular text-[17px] text-ink">{wordCount}</span>
+                  <span> of {target} words</span>
+                </p>
+                <div className="h-1.5 overflow-hidden rounded-full bg-panel-strong" aria-hidden>
+                  <div
+                    className="h-full rounded-full bg-teal transition-[width] duration-[var(--duration-fast)] ease-[var(--ease-smooth-out)] motion-reduce:transition-none"
+                    style={{ width: `${Math.min(1, wordCount / target) * 100}%` }}
                   />
                 </div>
               </div>
             </div>
 
-            {/* Right Column: Text editor with counter and Submit */}
-            <div className="w-[480px] md:w-[540px] lg:w-[600px] overflow-y-auto bg-muted/30 px-8 py-8 flex flex-col justify-between shrink-0" style={{
-              scrollbarColor: "var(--scrollbar-thumb) var(--scrollbar-track)",
-              scrollbarWidth: "thin"
-            }}>
-              {isGrading ? (
-                <div className="flex-1 flex flex-col items-center justify-center min-h-[500px] p-6 space-y-6">
-                  <div className="text-center space-y-3 max-w-md">
-                    <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/5 text-primary border border-primary/10 shadow-md">
-                      <RefreshCw className="h-7 w-7 animate-spin" />
-                    </div>
-                    <div className="space-y-1">
-                      <h3 className="font-extrabold text-base">Detailed IELTS Scoring in Progress</h3>
-                      <p className="text-xs text-muted-foreground leading-relaxed">
-                        Our examiner AI is measuring grammar, vocabulary, task response relevance, and writing styling in real-time.
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Glassmorphic streaming terminal */}
-                  <div className="w-full max-w-lg border border-primary/20 bg-background/50 backdrop-blur-md rounded-xl p-4 shadow-xl flex flex-col space-y-2 relative overflow-hidden min-h-[220px]">
-                    <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-violet-500 via-primary to-emerald-500 animate-pulse" />
-                    <div className="flex justify-between items-center text-[10px] text-muted-foreground border-b border-muted/50 pb-2">
-                      <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider">
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping" />
-                        Live AI Analysis Stream
-                      </div>
-                      <span className="font-mono">TTFT &lt; 1.0s</span>
-                    </div>
-                    <div className="flex-1 font-mono text-[11px] text-foreground leading-relaxed overflow-y-auto whitespace-pre-wrap select-text h-[180px] pr-2 scrollbar-thin">
-                      {streamingText || "Connecting to examiner stream..."}
-                      <span className="inline-block w-1.5 h-3.5 bg-primary ml-0.5 animate-pulse align-middle" />
-                    </div>
-                  </div>
+            {isGrading ? (
+              <section className="rounded-2xl border border-border bg-sheet p-5 sm:p-8" aria-busy>
+                <div className="mb-6 flex items-center gap-3">
+                  <span aria-hidden className="size-2 animate-pulse rounded-full bg-teal motion-reduce:animate-none" />
+                  <ThinkingStatus states={marking} className="text-[17px]" />
                 </div>
-              ) : (
-                <form onSubmit={handleEvaluate} className="space-y-4 flex-1 flex flex-col justify-between">
-                  <div className="space-y-4 flex-1 flex flex-col">
-                    <div className="flex justify-between items-center">
-                      <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                        Your Essay Response
-                      </label>
-                      <span className={`text-xs font-mono font-bold ${
-                        wordCount < (taskType === "task1" ? 150 : 250) 
-                          ? "text-amber-500" 
-                          : "text-emerald-500"
-                      }`}>
-                        Word Count: {wordCount} {taskType === "task1" ? "/ 150" : "/ 250"}
-                      </span>
-                    </div>
-
-                    <Textarea
-                      placeholder="Start typing your essay here..."
-                      value={essay}
-                      onChange={(e) => setEssay(e.target.value)}
-                      className={`${getTextSizeClass()} flex-1 min-h-[400px] font-sans leading-relaxed resize-none p-4 rounded-xl border border-muted/50 focus:ring-1 focus:ring-primary`}
-                      required
-                    />
-                  </div>
-
-                  <Button 
-                    type="submit" 
-                    className="w-full h-11 mt-6" 
-                    disabled={isGrading}
-                  >
-                    <CheckCircle className="mr-2 h-4 w-4" />
-                    Submit & Evaluate Response
-                  </Button>
-                </form>
-              )}
-            </div>
-          </div>
-        ) : (
-          // Full Screen Grading Report when graded
-          <div className="flex-1 overflow-y-auto bg-background px-8 py-8" style={{
-            scrollbarColor: "var(--scrollbar-thumb) var(--scrollbar-track)",
-            scrollbarWidth: "thin"
-          }}>
-            <div className="max-w-4xl mx-auto space-y-6">
-              <div className="flex justify-between items-center">
-                <h2 className="text-xl font-bold">IELTS Evaluation Report</h2>
-                <Button onClick={() => setResult(null)} variant="outline" size="sm" className="h-8">
-                  <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                  Evaluate New Essay
-                </Button>
-              </div>
-
-              {/* 1. Score summary block */}
-              <Card className="shadow-md border-muted/50">
-                <CardHeader className="pb-3 text-center">
-                  <CardTitle className="text-base font-bold">Estimated Writing Score</CardTitle>
-                </CardHeader>
-                <CardContent className="flex flex-col items-center justify-center space-y-3">
-                  <div className="relative flex h-24 w-24 items-center justify-center rounded-full border-4 border-primary/10 bg-primary/5 shadow-xs">
-                    <div className="text-center">
-                      <span className="text-3xl font-black text-primary font-mono block leading-none">
-                        {result.band_score.toFixed(1)}
-                      </span>
-                      <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-widest mt-1 block">
-                        Band
-                      </span>
+                <p className="max-w-[70ch] whitespace-pre-wrap text-[17px] leading-[1.75] text-soft">{essay}</p>
+                <p className="mt-6 text-sm text-soft">Marking usually takes under a minute. Keep this page open.</p>
+              </section>
+            ) : (
+              <form onSubmit={handleEvaluate} className="flex flex-col gap-4">
+                <div className="rounded-2xl border border-border bg-sheet focus-within:border-[#c9c3b9]">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-3 sm:px-8">
+                    <p className="text-sm text-soft">
+                      <span className="text-ink capitalize">{candidateName}</span>
+                      <span className="tabular"> · {candidateId}</span>
+                    </p>
+                    <div className="flex items-center gap-1" role="group" aria-label="Text size">
+                      {(["sm", "base", "lg"] as const).map((s) => (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => setFontScale(s)}
+                          aria-pressed={fontScale === s}
+                          aria-label={s === "sm" ? "Smaller text" : s === "lg" ? "Larger text" : "Normal text"}
+                          className={cn(
+                            "inline-flex size-8 items-center justify-center rounded-full text-ink transition-colors duration-[var(--duration-quick)] hover:bg-panel-strong",
+                            fontScale === s && "bg-panel-strong",
+                            s === "sm" ? "text-[13px]" : s === "lg" ? "text-[17px]" : "text-[15px]"
+                          )}
+                        >
+                          A
+                        </button>
+                      ))}
                     </div>
                   </div>
-                  <div className="text-center space-y-0.5">
-                    <h3 className="font-extrabold text-base text-foreground">IELTS Band Score</h3>
-                    <p className="text-xs text-muted-foreground text-center">
-                      Detailed metrics evaluate grammar, coherence, vocabulary complexity, and task response.
+                  <label htmlFor="essay" className="sr-only">
+                    Your answer
+                  </label>
+                  <Textarea
+                    id="essay"
+                    placeholder="Start writing your answer here."
+                    value={essay}
+                    onChange={(e) => setEssay(e.target.value)}
+                    spellCheck={false}
+                    className={cn(
+                      ESSAY_SIZE[fontScale],
+                      "min-h-[560px] max-w-[calc(70ch+4rem)] resize-none [field-sizing:content] rounded-none border-0 bg-transparent px-5 py-6 leading-[1.75] focus-visible:border-0 sm:px-8"
+                    )}
+                    required
+                  />
+                </div>
+
+                {gradeError && (
+                  <div role="alert" className="t-rise rounded-2xl bg-bad-tint p-4 text-[15px] leading-relaxed">
+                    <p className="font-medium text-bad">Marking did not finish.</p>
+                    <p className="mt-1 text-ink">
+                      {gradeError} Your essay is still here. Wait a minute, then mark it again.
                     </p>
                   </div>
+                )}
 
-                  {/* Criteria Subscores Grid */}
-                  <div className="grid grid-cols-2 gap-4 w-full max-w-xl pt-4">
-                    {[
-                      { label: "Task Achievement / Response", score: result.task_response },
-                      { label: "Coherence & Cohesion", score: result.coherence_cohesion },
-                      { label: "Lexical Resource", score: result.lexical_resource },
-                      { label: "Grammatical Range & Accuracy", score: result.grammar_accuracy },
-                    ].map((item, idx) => (
-                      <div key={idx} className="p-3 rounded-xl border border-muted/50 bg-background/50 space-y-1">
-                        <div className="text-[10px] font-semibold text-muted-foreground leading-tight truncate">{item.label}</div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-base font-extrabold font-mono text-foreground">
-                            Band {item.score?.toFixed(1) || "N/A"}
-                          </span>
-                          <span className={`h-2 w-2 rounded-full ${
-                            item.score >= 7.0 ? "bg-emerald-500" : item.score >= 6.0 ? "bg-blue-500" : "bg-amber-500"
-                          }`} />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* 2. Grammar diagnostics */}
-              <Card className="shadow-md border-muted/50">
-                <CardHeader>
-                  <CardTitle className="text-lg font-bold flex items-center gap-2">
-                    <AlertTriangle className="h-5 w-5 text-amber-500" />
-                    Grammar & Spelling Diagnostics
-                  </CardTitle>
-                  <CardDescription>
-                    Corrected sentences found in your writing response.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {result.corrections && result.corrections.length > 0 ? (
-                    <div className="divide-y divide-muted/50 space-y-4">
-                      {result.corrections.map((corr, idx) => (
-                        <div key={idx} className={`pt-4 first:pt-0 space-y-2`}>
-                          <div className="rounded-lg bg-rose-50 border border-rose-100 p-3 text-sm text-rose-800 dark:bg-rose-950/20 dark:border-rose-900/30 dark:text-rose-400">
-                            <span className="font-extrabold text-xs block uppercase tracking-wider text-rose-500 mb-1">
-                              Original
-                            </span>
-                            <p className="line-through">{corr.original}</p>
-                          </div>
-                          <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-3 text-sm text-emerald-800 dark:bg-emerald-950/20 dark:border-emerald-900/30 dark:text-emerald-400">
-                            <span className="font-extrabold text-xs block uppercase tracking-wider text-emerald-500 mb-1">
-                              Correction
-                            </span>
-                            <p className="font-medium">{corr.correction}</p>
-                          </div>
-                          <p className="text-xs text-muted-foreground leading-normal pl-1">
-                            <strong>Why:</strong> {corr.explanation}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground italic">No grammar errors detected. Outstanding!</p>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* 3. Vocabulary Suggestions */}
-              <Card className="shadow-md border-muted/50">
-                <CardHeader>
-                  <CardTitle className="text-lg font-bold flex items-center gap-2">
-                    <ChevronRight className="h-5 w-5 text-primary" />
-                    Lexical Resource Upgrades
-                  </CardTitle>
-                  <CardDescription>
-                    Vocabulary upgrades to elevate sentence precision and scoring.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {result.vocabulary_suggestions && result.vocabulary_suggestions.length > 0 ? (
-                    <div className="grid grid-cols-1 gap-3">
-                      {result.vocabulary_suggestions.map((voc, idx) => (
-                        <div key={idx} className="p-3 border border-muted/50 rounded-xl bg-background space-y-1 text-sm">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-muted-foreground line-through text-xs font-mono">{voc.original}</span>
-                            <ChevronRight className="h-3 w-3 text-muted-foreground" />
-                            <span className="text-primary font-bold bg-primary/10 px-2 py-0.5 rounded-md text-xs">
-                              {voc.suggestion}
-                            </span>
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                            {voc.explanation}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground italic">No repetitive vocabulary patterns found.</p>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* 4. Actionable improvements list */}
-              <Card className="shadow-md border-muted/50">
-                <CardHeader>
-                  <CardTitle className="text-lg font-bold">Key Improvement Points</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ul className="space-y-2.5">
-                    {result.improvements.map((imp, idx) => (
-                      <li key={idx} className="flex items-start gap-2.5 text-sm text-muted-foreground leading-relaxed">
-                        <CheckCircle className="h-5 w-5 text-primary shrink-0 mt-0.5" />
-                        <span>{imp}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </CardContent>
-              </Card>
-
-              {/* 5. Improved Essay */}
-              <Card className="shadow-md border-muted/50">
-                <CardHeader>
-                  <CardTitle className="text-lg font-bold">Model Essay (Band 8.5+)</CardTitle>
-                  <CardDescription>
-                    Study this restructured, highly coherent version of your response.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap bg-muted/30 p-4 rounded-xl border border-muted/50 font-sans select-text">
-                    {result.improved_essay}
+                <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-sm text-soft">
+                    {wordCount < (taskType === "task1" ? 50 : 100)
+                      ? `Marking needs at least ${taskType === "task1" ? 50 : 100} words.`
+                      : reached
+                        ? `Over the ${target}-word minimum.`
+                        : `${target - wordCount} words short of the minimum; you will lose marks for length.`}
                   </p>
-                </CardContent>
-              </Card>
-
-              {/* 6. Candidate Original Essay */}
-              <Card className="shadow-md border-muted/50">
-                <CardHeader className="pb-3 flex flex-row items-center justify-between space-y-0">
-                  <div>
-                    <CardTitle className="text-lg font-bold">Your Response & AI Markup</CardTitle>
-                    <CardDescription>
-                      {viewMode === "annotated" 
-                        ? "Hover over highlighted words to see grammatical feedback and reasoning."
-                        : "Review what you wrote during this practice attempt."
-                      }
-                    </CardDescription>
-                  </div>
-                  <div className="flex rounded-md border border-muted p-0.5 text-xs bg-muted/20">
-                    <button
-                      type="button"
-                      onClick={() => setViewMode("annotated")}
-                      className={`px-3 py-1.5 rounded-sm font-semibold transition-all cursor-pointer ${
-                        viewMode === "annotated" ? "bg-background shadow-xs text-primary" : "text-muted-foreground"
-                      }`}
-                    >
-                      AI Markup
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setViewMode("original")}
-                      className={`px-3 py-1.5 rounded-sm font-semibold transition-all cursor-pointer ${
-                        viewMode === "original" ? "bg-background shadow-xs text-primary" : "text-muted-foreground"
-                      }`}
-                    >
-                      Original
-                    </button>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-sm text-foreground leading-relaxed bg-muted/10 p-4 rounded-xl border border-muted/50 font-sans select-text">
-                    {viewMode === "annotated" 
-                      ? getAnnotatedEssay(essay, result.corrections)
-                      : <p className="whitespace-pre-wrap">{essay}</p>
-                    }
-                  </div>
-                </CardContent>
-              </Card>
-
-            </div>
+                  <Button type="submit" variant="accent" size="lg" disabled={isGrading}>
+                    {gradeError ? "Mark it again" : "Mark my essay"}
+                  </Button>
+                </div>
+              </form>
+            )}
           </div>
-        )}
-      </div>
-    </div>
+        </div>
+      </PageColumn>
+    </AppShell>
+  );
+}
+
+function WritingSkeleton() {
+  return (
+    <AppShell title="Writing">
+      <PageColumn title="Writing" lead="Loading your answer sheet.">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-12" aria-busy>
+          <div className="t-skel h-[320px] rounded-2xl lg:col-span-5" />
+          <div className="t-skel h-[560px] rounded-2xl lg:col-span-7" />
+        </div>
+      </PageColumn>
+    </AppShell>
   );
 }
 
 export default function WritingPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="flex min-h-screen items-center justify-center bg-background">
-          <div className="text-center space-y-4">
-            <Loader2 className="h-10 w-10 animate-spin text-primary mx-auto" />
-            <p className="text-sm text-muted-foreground">Loading writing module...</p>
-          </div>
-        </div>
-      }
-    >
+    <Suspense fallback={<WritingSkeleton />}>
       <WritingPageContent />
     </Suspense>
   );

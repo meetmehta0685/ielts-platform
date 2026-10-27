@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import { readSseEvents } from "@/lib/sse";
-import { Loader2 } from "lucide-react";
+import { PanelLeft } from "lucide-react";
+import { AppShell } from "@/components/app/app-shell";
 
 import { ChatSidebar } from "@/components/chat/chat-sidebar";
 import { ChatArea } from "@/components/chat/chat-area";
@@ -39,6 +40,13 @@ export default function ChatPage() {
   const [isAuthVerifying, setIsAuthVerifying] = useState(true);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [firstName, setFirstName] = useState<string | null>(null);
+
+  // A question asked before any conversation exists: held here until the new session is created.
+  const pendingPromptRef = useRef<string | null>(null);
+  const [pendingAsk, setPendingAsk] = useState<string | null>(null);
+  const isStreamingRef = useRef(false);
+  const [chatError, setChatError] = useState<{ message: string; content: string; sessionId: string } | null>(null);
 
   // Auto-initiate module states
   const [moduleParam, setModuleParam] = useState<string | null>(null);
@@ -75,6 +83,8 @@ export default function ChatPage() {
 
         if (session.user) {
           setUserId(session.user.id);
+          const full = (session.user.user_metadata?.full_name as string | undefined)?.trim();
+          setFirstName(full ? full.split(/\s+/)[0] : null);
         } else {
           // If session.user is stripped from the cookie storage, fetch details using getUser()
           const { data: { user }, error: userError } = await supabase.auth.getUser();
@@ -96,7 +106,12 @@ export default function ChatPage() {
   }, [router]);
 
   // 2. Fetch all chat sessions for the user using TanStack Query
-  const { data: sessions = EMPTY_SESSIONS, isLoading: isLoadingSessions } = useQuery<ChatSession[]>({
+  const {
+    data: sessions = EMPTY_SESSIONS,
+    isLoading: isLoadingSessions,
+    isError: isSessionsError,
+    refetch: refetchSessions,
+  } = useQuery<ChatSession[]>({
     queryKey: ["chat-sessions", userId, token],
     queryFn: async () => {
       if (!userId || !token) return [];
@@ -128,8 +143,9 @@ export default function ChatPage() {
   });
 
   // Sync server-fetched messages with local display messages
+  // (skipped mid-stream, so a refetch of a brand-new session cannot wipe the question just sent)
   useEffect(() => {
-    if (serverMessages) {
+    if (serverMessages && !isStreamingRef.current) {
       setLocalMessages(serverMessages);
     }
   }, [serverMessages]);
@@ -175,9 +191,18 @@ export default function ChatPage() {
           window.history.replaceState(null, "", "/chat");
         }
         setModuleParam(null);
+      } else if (pendingPromptRef.current) {
+        // A question typed (or a starter picked) before a conversation existed
+        const pending = pendingPromptRef.current;
+        pendingPromptRef.current = null;
+        setTimeout(() => {
+          handleSendMessage(pending, newSession.session_id);
+        }, 100);
       }
     },
     onError: (err: any) => {
+      pendingPromptRef.current = null;
+      setPendingAsk(null);
       toast.error(err.message || "Failed to start new chat.");
     },
   });
@@ -198,9 +223,12 @@ export default function ChatPage() {
     // Append user's message locally immediately for instant feedback
     const userMessage: Message = { role: "user", content };
     setLocalMessages((prev) => [...prev, userMessage]);
-    
+    setPendingAsk(null);
+
+    isStreamingRef.current = true;
     setIsStreaming(true);
     setStreamingMessage("");
+    setChatError(null);
 
     try {
       const response = await fetch(`${BACKEND_URL}/api/chat/stream`, {
@@ -227,73 +255,103 @@ export default function ChatPage() {
       queryClient.invalidateQueries({ queryKey: ["chat-sessions", userId, token] });
 
     } catch (err: any) {
-      toast.error(err.message || "Something went wrong during message streaming.");
+      const message = err.message || "Something went wrong during message streaming.";
+      setChatError({ message, content, sessionId });
+      toast.error(message);
     } finally {
       setStreamingMessage("");
+      isStreamingRef.current = false;
       setIsStreaming(false);
     }
   };
 
-  if (isAuthVerifying) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <div className="text-center space-y-4">
-          <Loader2 className="h-10 w-10 animate-spin text-primary mx-auto" />
-          <p className="text-sm text-muted-foreground">Verifying access...</p>
-        </div>
-      </div>
+  // Ask from anywhere: with no conversation open, start one and send once it exists.
+  const ask = (content: string) => {
+    if (activeSessionId) {
+      handleSendMessage(content);
+      return;
+    }
+    if (createSessionMutation.isPending) return;
+    pendingPromptRef.current = content;
+    setPendingAsk(content);
+    createSessionMutation.mutate();
+  };
+
+  // Re-send the question that failed, without leaving a duplicate bubble behind.
+  const retryLast = () => {
+    if (!chatError) return;
+    const { content, sessionId } = chatError;
+    setChatError(null);
+    setLocalMessages((prev) =>
+      prev.length && prev[prev.length - 1].role === "user" && prev[prev.length - 1].content === content
+        ? prev.slice(0, -1)
+        : prev
     );
-  }
+    handleSendMessage(content, sessionId);
+  };
+
+  const activeSession = sessions.find((s) => s.id === activeSessionId);
+  const visibleError = chatError && chatError.sessionId === activeSessionId ? chatError.message : null;
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
-      {/* Sidebar - Sessions history */}
-      <ChatSidebar
-        sessions={sessions}
-        activeSessionId={activeSessionId}
-        onSelectSession={setActiveSessionId}
-        onCreateSession={() => createSessionMutation.mutate()}
-        isOpen={sidebarOpen}
-        onToggleOpen={() => setSidebarOpen((prev) => !prev)}
-        isCreating={createSessionMutation.isPending}
-      />
-
-      {/* Main Container */}
-      <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Header */}
-        <header className="flex h-16 items-center justify-between border-b border-muted/50 px-6 md:px-8 bg-background/80 backdrop-blur-md shrink-0">
-          <div className="flex items-center gap-4 pl-12 md:pl-0">
-            <h1 className="text-sm font-extrabold text-foreground tracking-tight">IELTS AI Mentor</h1>
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 ring-1 ring-inset ring-emerald-600/10 dark:bg-emerald-500/10 dark:text-emerald-400 dark:ring-emerald-500/20">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              Active Trainer
-            </span>
-          </div>
-          <a
-            href="/dashboard"
-            className="text-xs font-bold text-primary hover:text-primary/80 transition-colors"
-          >
-            Back to Dashboard
-          </a>
-        </header>
-
-        {/* Messages display area */}
-        <ChatArea
-          messages={localMessages}
-          isLoading={isLoadingMessages}
-          streamingMessage={streamingMessage}
+    <AppShell title="Ask the mentor">
+      <div className="flex h-[calc(100dvh-48px)] lg:h-[calc(100dvh-18px)]">
+        <ChatSidebar
+          sessions={sessions}
           activeSessionId={activeSessionId}
-          onStarterClick={handleSendMessage}
+          onSelectSession={setActiveSessionId}
+          onCreateSession={() => createSessionMutation.mutate()}
+          isOpen={sidebarOpen}
+          onToggleOpen={() => setSidebarOpen((prev) => !prev)}
+          isCreating={createSessionMutation.isPending}
+          isLoading={isAuthVerifying || isLoadingSessions}
+          isError={isSessionsError}
+          onRetry={() => refetchSessions()}
         />
 
-        {/* Message Input box */}
-        <ChatInput
-          onSendMessage={handleSendMessage}
-          isDisabled={isStreaming}
-          isStreaming={isStreaming}
-          activeSessionId={activeSessionId}
-        />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border pr-4 pl-2 sm:pl-4 lg:px-6">
+            <button
+              type="button"
+              onClick={() => setSidebarOpen((prev) => !prev)}
+              aria-expanded={sidebarOpen}
+              className="inline-flex h-11 items-center gap-2 rounded-full px-3 text-[15px] text-ink transition-colors duration-[var(--duration-quick)] hover:bg-panel lg:hidden"
+            >
+              <PanelLeft className="size-4" />
+              {sidebarOpen ? "Close" : "Conversations"}
+            </button>
+            <p key={activeSessionId ?? "new"} className="t-swap min-w-0 flex-1 truncate text-[15px] font-medium text-ink max-lg:text-right">
+              {activeSession?.title || (activeSessionId ? "Conversation" : "New conversation")}
+            </p>
+          </header>
+
+          <ChatArea
+            messages={
+              pendingAsk
+                ? [...(activeSessionId ? localMessages : EMPTY_MESSAGES), { role: "user", content: pendingAsk }]
+                : activeSessionId
+                  ? localMessages
+                  : EMPTY_MESSAGES
+            }
+            isLoading={!pendingAsk && (isAuthVerifying || isLoadingMessages)}
+            streamingMessage={streamingMessage}
+            activeSessionId={activeSessionId}
+            onStarterClick={ask}
+            isStreaming={isStreaming || !!pendingAsk}
+            firstName={firstName}
+            error={visibleError}
+            onRetry={retryLast}
+          />
+
+          <ChatInput
+            onSendMessage={ask}
+            isDisabled={isStreaming}
+            isStreaming={isStreaming}
+            activeSessionId={activeSessionId}
+            isBusy={isAuthVerifying || createSessionMutation.isPending}
+          />
+        </div>
       </div>
-    </div>
+    </AppShell>
   );
 }

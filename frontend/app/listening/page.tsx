@@ -1,23 +1,25 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense } from "react";
 import { toast } from "sonner";
-import { Loader2, ArrowLeft, CheckCircle, Clock, AlertCircle, Play, Pause, Volume2 } from "lucide-react";
+import { AppShell, PageColumn, Panel } from "@/components/app/app-shell";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { ExamFrame, candidateNameFrom, formatClock, type TextScale } from "@/components/exam/exam-frame";
+import {
+  QuestionGroups,
+  QuestionNavigator,
+  questionTypeLabel,
+  type ExamQuestion,
+} from "@/components/exam/question-field";
+import { ObjectiveResults, ResultActions, type ObjectiveResult } from "@/components/exam/exam-results";
+import { ExamError, ExamLoading, FactRow } from "@/components/exam/exam-states";
+import { AudioPlayer } from "@/components/exam/audio-player";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-interface Question {
-  id: number;
-  type: "multiple-choice" | "true-false-not-given" | "fill-gap";
-  questionText: string;
-  options?: string[];
-}
+type Question = ExamQuestion;
 
 interface Section {
   id: number;
@@ -33,19 +35,7 @@ interface ListeningTest {
   sections: Section[];
 }
 
-interface GradingDetail {
-  correct: boolean;
-  correctAnswer: string;
-  submittedAnswer: string;
-}
-
-interface ResultData {
-  score: number;
-  total_questions: number;
-  band_score: number;
-  details: Record<number, GradingDetail>;
-  explanations: Record<number, string>;
-}
+type ResultData = ObjectiveResult;
 
 function ListeningPageContent() {
   const router = useRouter();
@@ -55,15 +45,19 @@ function ListeningPageContent() {
 
   // Candidate Details
   const [candidateName, setCandidateName] = useState("Candidate");
-  const [candidateId, setCandidateId] = useState("ielts-candidate");
 
   // CBT Configuration States
   const [isTimerHidden, setIsTimerHidden] = useState(false);
-  const [fontScale, setFontScale] = useState<"sm" | "base" | "lg">("base");
+  const [fontScale, setFontScale] = useState<TextScale>("base");
 
   // Test data states
   const [test, setTest] = useState<ListeningTest | null>(null);
   const [isLoadingTest, setIsLoadingTest] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // The attempt starts from the intro screen; the clock only runs once started.
+  const [started, setStarted] = useState(false);
+  const [justMarked, setJustMarked] = useState(false);
 
   // Student answer inputs
   const [answers, setAnswers] = useState<Record<number, string>>({});
@@ -73,6 +67,7 @@ function ListeningPageContent() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioDuration, setAudioDuration] = useState(0);
   const [audioProgress, setAudioProgress] = useState(0);
+  const [audioStatus, setAudioStatus] = useState<"loading" | "ready" | "error">("loading");
 
   // Timer states
   const [timeLeft, setTimeLeft] = useState(1800); // 30 mins
@@ -92,10 +87,7 @@ function ListeningPageContent() {
           router.push("/auth/login?redirect=/listening");
         } else {
           setToken(session.access_token);
-          if (session.user) {
-            setCandidateName(session.user.email?.split("@")[0] || "Candidate");
-            setCandidateId(`ielts-${session.user.id.substring(0, 8)}`);
-          }
+          if (session.user) setCandidateName(candidateNameFrom(session.user));
         }
       } catch (err) {
         console.error(err);
@@ -112,6 +104,7 @@ function ListeningPageContent() {
 
     const fetchTest = async () => {
       try {
+        setLoadError(null);
         const attemptId = searchParams.get("attempt_id");
         if (attemptId) {
           const { data: attemptData, error: attemptErr } = await supabase
@@ -131,6 +124,7 @@ function ListeningPageContent() {
           });
           if (!res.ok) throw new Error("Failed to load listening test");
           const tests = await res.json();
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const matchedTest = tests.find((t: any) => t.title === attemptData.test_title) || tests[0];
 
           if (matchedTest) {
@@ -143,6 +137,7 @@ function ListeningPageContent() {
               explanations: attemptData.explanations_json,
             });
             const initialAnswers: Record<number, string> = {};
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             Object.entries(attemptData.answers_json || {}).forEach(([qId, detail]: [string, any]) => {
               initialAnswers[Number(qId)] = detail.submittedAnswer || "";
             });
@@ -161,8 +156,10 @@ function ListeningPageContent() {
             setTimeLeft(data[0].duration * 60);
           }
         }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {
         console.error(err);
+        setLoadError(err.message || "Failed to load listening test materials.");
         toast.error(err.message || "Failed to load listening test materials.");
       } finally {
         setIsLoadingTest(false);
@@ -172,15 +169,15 @@ function ListeningPageContent() {
     fetchTest();
   }, [token, searchParams]);
 
-  // Start countdown timer
+  // Start countdown timer (only once the candidate has pressed Start)
   useEffect(() => {
-    if (!test || result || isSubmitting || timeLeft <= 0) return;
+    if (!started || !test || result || isSubmitting || timeLeft <= 0) return;
     const timer = setTimeout(() => {
       setTimeLeft(timeLeft - 1);
       if (timeLeft <= 1) submitRef.current(); // Auto-submit when time expires
     }, 1000);
     return () => clearTimeout(timer);
-  }, [test, result, isSubmitting, timeLeft]);
+  }, [started, test, result, isSubmitting, timeLeft]);
 
   // Handle HTML5 audio controls
   const togglePlay = () => {
@@ -189,8 +186,10 @@ function ListeningPageContent() {
       audioRef.current.pause();
       setIsPlaying(false);
     } else {
-      audioRef.current.play();
-      setIsPlaying(true);
+      audioRef.current
+        .play()
+        .then(() => setIsPlaying(true))
+        .catch(() => toast.error("Unable to play the audio."));
     }
   };
 
@@ -202,11 +201,11 @@ function ListeningPageContent() {
   const handleAudioLoadedMetadata = () => {
     if (!audioRef.current) return;
     setAudioDuration(audioRef.current.duration);
+    setAudioStatus("ready");
   };
 
-  const handleProgressChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleProgressChange = (value: number) => {
     if (!audioRef.current) return;
-    const value = parseFloat(e.target.value);
     audioRef.current.currentTime = value;
     setAudioProgress(value);
   };
@@ -244,7 +243,10 @@ function ListeningPageContent() {
       if (!response.ok) throw new Error("Failed to grade listening answers");
       const data = await response.json();
       setResult(data);
+      setJustMarked(true);
+      window.scrollTo(0, 0);
       toast.success("Listening test graded!");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       toast.error(err.message || "Failed to grade answers.");
     } finally {
@@ -259,8 +261,11 @@ function ListeningPageContent() {
   const handleReset = () => {
     setAnswers({});
     setResult(null);
+    setStarted(false);
+    setJustMarked(false);
     setIsPlaying(false);
     setAudioProgress(0);
+    setAudioStatus("loading");
     if (audioRef.current) {
       audioRef.current.currentTime = 0;
     }
@@ -268,355 +273,152 @@ function ListeningPageContent() {
     router.replace("/listening");
   };
 
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = Math.floor(seconds % 60);
-    return `${m}:${s < 10 ? "0" : ""}${s}`;
-  };
-
   if (isAuthLoading || isLoadingTest) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <div className="text-center space-y-4">
-          <Loader2 className="h-10 w-10 animate-spin text-primary mx-auto" />
-          <p className="text-sm text-muted-foreground">Loading listening module...</p>
-        </div>
-      </div>
-    );
+    return <ExamLoading shellTitle="Listening" label="Loading your listening test" />;
   }
 
   if (!test) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <div className="text-center space-y-4">
-          <AlertCircle className="h-10 w-10 text-rose-500 mx-auto" />
-          <p className="text-sm text-muted-foreground">No active listening test found.</p>
-        </div>
-      </div>
+      <ExamError
+        shellTitle="Listening"
+        title={loadError ? "The listening test did not load." : "No listening test is available."}
+        detail={
+          loadError
+            ? `${loadError}. Nothing was started and no time was used.`
+            : "There are no listening papers on the server yet."
+        }
+      />
     );
   }
 
   const section = test.sections[0];
+  const questions = test.sections.flatMap((s) => s.questions);
+  const answeredCount = questions.filter((q) => (answers[q.id] ?? "").trim() !== "").length;
+  const unanswered = questions.length - answeredCount;
+  const textClass = fontScale === "lg" ? "text-[18px]" : fontScale === "sm" ? "text-[15px]" : "text-[16px]";
 
-  const getTextSizeClass = () => {
-    if (fontScale === "sm") return "text-xs";
-    if (fontScale === "lg") return "text-base";
-    return "text-sm";
-  };
+  // RESULTS
+  if (result) {
+    return (
+      <AppShell title="Listening">
+        <PageColumn
+          title={`${result.score} of ${result.total_questions} correct.`}
+          lead={test.title}
+          actions={<ResultActions onRetry={handleReset} retryLabel="Take it again" />}
+        >
+          <ObjectiveResults module="Listening" result={result} questions={questions} justMarked={justMarked} />
+        </PageColumn>
+      </AppShell>
+    );
+  }
 
+  // INTRO
+  if (!started) {
+    const byType = (Object.keys(questionTypeLabel) as Question["type"][])
+      .map((type) => ({ type, items: questions.filter((q) => q.type === type) }))
+      .filter((g) => g.items.length > 0);
+    const sections = test.sections.length;
+    return (
+      <AppShell title="Listening">
+        <PageColumn
+          title={`${sections === 1 ? "One recording" : `${sections} recordings`}, ${questions.length} questions, ${test.duration} minutes.`}
+          lead={`${test.title}. Have headphones on; the clock starts when you press Start.`}
+          actions={
+            <Button variant="accent" size="lg" onClick={() => setStarted(true)}>
+              Start the test
+            </Button>
+          }
+        >
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+            <Panel className="lg:col-span-8" title="What you will answer" aside={`${questions.length} questions`}>
+              {byType.map((g) => (
+                <FactRow
+                  key={g.type}
+                  label={questionTypeLabel[g.type]}
+                  note={`Question${g.items.length > 1 ? "s" : ""} ${g.items.map((q) => q.id).join(", ")}`}
+                  value={g.items.length}
+                />
+              ))}
+            </Panel>
+            <Panel className="lg:col-span-4" title="Time allowed">
+              <p className="tabular text-[48px] leading-none text-ink">{formatClock(test.duration * 60)}</p>
+              <ul className="mt-5 flex flex-col gap-2 text-[15px] leading-normal text-soft">
+                <li>In the real test the recording plays once, with no pausing. Here you can pause and scrub back.</li>
+                <li>Read the questions before you press play, and answer as you listen.</li>
+                <li>At 0:00 your answers are submitted for you.</li>
+              </ul>
+            </Panel>
+          </div>
+        </PageColumn>
+      </AppShell>
+    );
+  }
+
+  // IN TEST
   return (
-    <div className="min-h-screen bg-muted/20 flex flex-col justify-between">
-      {/* Top Header */}
-      <header className="sticky top-0 z-10 border-b border-muted/50 bg-[#333f48] text-white px-6 h-16 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
-          <a href="/dashboard">
-            <Button variant="ghost" size="icon" className="h-8 w-8 mr-1 text-white hover:bg-white/10">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </a>
-          <span className="font-bold tracking-tight text-white">IELTS CBT Practice - Listening</span>
-        </div>
-
-        {/* Center: CBT Enforced Timer */}
-        {!result && (
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2 bg-[#222a30] text-white px-4 py-1.5 rounded-md border border-white/10 text-sm font-bold font-mono">
-              <Clock className="h-4 w-4 text-[#ffc72c] animate-pulse" />
-              <span>{isTimerHidden ? "--:--" : formatTime(timeLeft)}</span>
-            </div>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => setIsTimerHidden(!isTimerHidden)}
-              className="text-xs h-8 border-white/20 text-white bg-transparent hover:bg-white/10 hover:text-white"
-            >
-              {isTimerHidden ? "Show Time" : "Hide Time"}
-            </Button>
-          </div>
-        )}
-
-        <div className="flex items-center gap-4">
-          {/* Font Resizing Controls */}
-          <div className="flex items-center gap-1 bg-[#222a30] rounded-md p-1 border border-white/10">
-            <Button 
-              size="icon" 
-              variant="ghost" 
-              onClick={() => setFontScale("sm")}
-              className={`h-7 w-7 text-xs ${fontScale === "sm" ? "bg-primary text-white" : "text-white/70"}`}
-            >
-              A-
-            </Button>
-            <Button 
-              size="icon" 
-              variant="ghost" 
-              onClick={() => setFontScale("base")}
-              className={`h-7 w-7 text-xs ${fontScale === "base" ? "bg-primary text-white" : "text-white/70"}`}
-            >
-              A
-            </Button>
-            <Button 
-              size="icon" 
-              variant="ghost" 
-              onClick={() => setFontScale("lg")}
-              className={`h-7 w-7 text-xs ${fontScale === "lg" ? "bg-primary text-white" : "text-white/70"}`}
-            >
-              A+
-            </Button>
-          </div>
-
-          {/* Candidate Info */}
-          <div className="hidden md:flex flex-col items-end text-xs">
-            <span className="font-bold text-white/95 capitalize">{candidateName}</span>
-            <span className="text-white/60 font-mono text-[10px]">{candidateId}</span>
-          </div>
-
-          <a href="/dashboard" className="text-xs font-bold text-[#ffc72c] hover:underline">
-            Exit
-          </a>
-        </div>
-      </header>
-
-      {/* Main Container */}
-      <main className="flex-1 mx-auto max-w-4xl w-full px-4 py-8 space-y-6">
-        {/* HTML5 Hidden Audio Tag */}
+    <ExamFrame
+      module="Listening"
+      context={test.title}
+      candidateName={candidateName}
+      timeLeft={timeLeft}
+      timerHidden={isTimerHidden}
+      onToggleTimer={() => setIsTimerHidden(!isTimerHidden)}
+      textScale={fontScale}
+      onTextScale={setFontScale}
+      submitting={isSubmitting}
+      onSubmit={() => handleSubmit()}
+      submitConfirm={
+        unanswered > 0
+          ? `${unanswered} of ${questions.length} questions ${unanswered === 1 ? "is" : "are"} unanswered and will score zero.`
+          : null
+      }
+      exitBody="Your answers on this recording will not be saved or marked."
+      footer={<QuestionNavigator questions={questions} answers={answers} />}
+    >
+      <div className="h-full overflow-y-auto">
         <audio
           ref={audioRef}
           src={section.audioUrl}
+          preload="metadata"
           onTimeUpdate={handleAudioTimeUpdate}
           onLoadedMetadata={handleAudioLoadedMetadata}
+          onEnded={() => setIsPlaying(false)}
+          onError={() => setAudioStatus("error")}
         />
-
-        {/* 1. Audio Control Card */}
-        <Card className="shadow-md border-muted/50 overflow-hidden bg-gradient-to-br from-primary/5 to-transparent">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base font-bold flex items-center gap-2">
-              <Volume2 className="h-5 w-5 text-primary" />
-              Audio Lecture Player
-            </CardTitle>
-            <CardDescription>{test.title}</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center gap-4">
-              {/* Play Pause button */}
-              <Button
-                onClick={togglePlay}
-                size="icon"
-                className="h-12 w-12 rounded-full shadow-md shadow-primary/10 shrink-0"
-              >
-                {isPlaying ? <Pause className="h-5 w-5 fill-current" /> : <Play className="h-5 w-5 fill-current ml-0.5" />}
-              </Button>
-
-              {/* Progress Slider */}
-              <div className="flex-1 space-y-1">
-                <input
-                  type="range"
-                  min="0"
-                  max={audioDuration || 100}
-                  value={audioProgress}
-                  onChange={handleProgressChange}
-                  className="w-full h-1.5 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
-                />
-                <div className="flex justify-between text-[10px] font-mono text-muted-foreground">
-                  <span>{formatTime(audioProgress)}</span>
-                  <span>{formatTime(audioDuration)}</span>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* 2. Questions form or Grading Report */}
-        {!result ? (
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="space-y-4">
-              <div>
-                <h2 className={`font-bold ${fontScale === "sm" ? "text-sm" : fontScale === "lg" ? "text-lg" : "text-base"}`}>{section.instructions}</h2>
-                <p className="text-xs text-muted-foreground">Ensure spelling and numerical formatting is correct.</p>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {section.questions.map((q) => (
-                  <div key={q.id} className="bg-background rounded-xl p-4 border border-muted/50 space-y-3 shadow-xs">
-                    <div className="flex items-start gap-2">
-                      <span className="font-bold text-xs text-primary font-mono bg-primary/10 px-2 py-0.5 rounded-md">
-                        {q.id}
-                      </span>
-                      <p className={`${getTextSizeClass()} font-semibold text-foreground leading-normal`}>{q.questionText}</p>
-                    </div>
-
-                    {q.type === "multiple-choice" && (
-                      <div className="flex flex-col gap-1.5 pt-1">
-                        {q.options?.map((opt) => {
-                          const choiceLetter = opt.charAt(0);
-                          const isSelected = answers[q.id] === choiceLetter;
-                          return (
-                            <button
-                              key={opt}
-                              type="button"
-                              onClick={() => handleAnswerChange(q.id, choiceLetter)}
-                              className={`text-left text-xs p-2.5 rounded-lg border transition-all cursor-pointer ${
-                                isSelected 
-                                  ? "bg-primary/5 border-primary text-primary font-bold" 
-                                  : "bg-background border-muted hover:border-primary/20 hover:bg-muted"
-                              }`}
-                            >
-                              {opt}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {q.type === "true-false-not-given" && (
-                      <div className="flex flex-wrap gap-2 pt-1 text-xs">
-                        {["TRUE", "FALSE", "NOT GIVEN"].map((opt) => {
-                          const isSelected = answers[q.id] === opt;
-                          return (
-                            <button
-                              key={opt}
-                              type="button"
-                              onClick={() => handleAnswerChange(q.id, opt)}
-                              className={`px-3 py-2 rounded-lg border font-bold transition-all cursor-pointer ${
-                                isSelected 
-                                  ? "bg-primary text-primary-foreground border-primary" 
-                                  : "bg-background border-border text-foreground hover:bg-muted"
-                                }`}
-                            >
-                              {opt}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {q.type === "fill-gap" && (
-                      <Input
-                        placeholder="Type word or digits here..."
-                        value={answers[q.id] || ""}
-                        onChange={(e) => handleAnswerChange(q.id, e.target.value)}
-                        className="h-9 text-xs"
-                      />
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <Button type="submit" className="w-full h-11" disabled={isSubmitting}>
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Grading answers...
-                </>
-              ) : (
-                "Submit Listening Answers"
-              )}
-            </Button>
-          </form>
-        ) : (
-          // Grading report display
-          <div className="space-y-6 animate-message-appear">
-            {/* Overall Score */}
-            <Card className="shadow-md border-muted/50">
-              <CardHeader className="pb-3 text-center">
-                <CardTitle className="text-base font-bold">Listening Score Summary</CardTitle>
-              </CardHeader>
-              <CardContent className="flex flex-col items-center justify-center space-y-3">
-                <div className="flex h-20 w-20 items-center justify-center rounded-full border-4 border-emerald-500/20 bg-emerald-500/5">
-                  <div className="text-center">
-                    <span className="text-2xl font-black text-emerald-600 font-mono block leading-none">
-                      {result.score}/{result.total_questions}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-widest mt-0.5 block">
-                      Correct
-                    </span>
-                  </div>
-                </div>
-                <div className="text-center space-y-0.5">
-                  <div className="text-lg font-black text-foreground font-mono">
-                    Band {result.band_score.toFixed(1)}
-                  </div>
-                  <p className="text-xs text-muted-foreground">Estimated IELTS Listening Level</p>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Questions Review list */}
-            <div className="space-y-4">
-              <h3 className="text-sm font-bold text-foreground">Review Answers</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {section.questions.map((q) => {
-                  const detail = result.details[q.id];
-                  const explanation = result.explanations[q.id];
-                  const isCorrect = detail?.correct;
-
-                  return (
-                    <div 
-                      key={q.id} 
-                      className={`rounded-xl p-4 border text-xs space-y-2 shadow-xs ${
-                        isCorrect 
-                          ? "bg-emerald-50/20 border-emerald-100" 
-                          : "bg-rose-50/20 border-rose-100"
-                      }`}
-                    >
-                      <div className="flex justify-between items-center">
-                        <span className="font-bold font-mono text-primary">Question {q.id}</span>
-                        <span className={`font-bold px-2 py-0.5 rounded-full text-[9px] uppercase tracking-wider ${
-                          isCorrect ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
-                        }`}>
-                          {isCorrect ? "Correct" : "Incorrect"}
-                        </span>
-                      </div>
-                      <p className="font-semibold text-foreground leading-normal">{q.questionText}</p>
-                      <div className="flex flex-col gap-1 text-[11px] pt-1">
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Your Answer:</span>
-                          <span className={`font-bold ${isCorrect ? "text-emerald-600" : "text-rose-600"}`}>
-                            {detail?.submittedAnswer || "(Blank)"}
-                          </span>
-                        </div>
-                        {!isCorrect && (
-                          <div className="flex justify-between border-t border-muted/20 pt-1 mt-1">
-                            <span className="text-muted-foreground">Correct Answer:</span>
-                            <span className="font-bold text-emerald-600">
-                              {detail?.correctAnswer}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                      {!isCorrect && explanation && (
-                        <div className="bg-background/80 border border-muted/50 p-2.5 rounded-lg text-[10px] text-muted-foreground leading-relaxed mt-2 italic">
-                          <strong>AI explanation:</strong> {explanation}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <Button onClick={handleReset} variant="outline" className="w-full">
-              Restart Practice Test
-            </Button>
+        <form onSubmit={(e) => e.preventDefault()} className="mx-auto max-w-[760px] px-5 py-8 sm:px-8 lg:py-12">
+          <p className="text-[14px] text-soft">Part {section.id}</p>
+          <h1 className="mt-1 text-[26px] font-medium leading-tight text-ink">{section.instructions}</h1>
+          <div className="mt-6">
+            <AudioPlayer
+              title={`Part ${section.id} recording`}
+              isPlaying={isPlaying}
+              progress={audioProgress}
+              duration={audioDuration}
+              status={audioStatus}
+              onToggle={togglePlay}
+              onSeek={handleProgressChange}
+              disabled={isSubmitting}
+            />
           </div>
-        )}
-      </main>
-    </div>
+          <p className="mt-3 text-[14px] text-soft">Check spelling and write numbers as digits.</p>
+          <div className="mt-10">
+            <QuestionGroups
+              questions={questions}
+              answers={answers}
+              onAnswer={handleAnswerChange}
+              disabled={isSubmitting}
+              textClass={textClass}
+            />
+          </div>
+        </form>
+      </div>
+    </ExamFrame>
   );
 }
 
 export default function ListeningPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="flex min-h-screen items-center justify-center bg-background">
-          <div className="text-center space-y-4">
-            <Loader2 className="h-10 w-10 animate-spin text-primary mx-auto" />
-            <p className="text-sm text-muted-foreground">Loading listening module...</p>
-          </div>
-        </div>
-      }
-    >
+    <Suspense fallback={<ExamLoading shellTitle="Listening" label="Loading your listening test" />}>
       <ListeningPageContent />
     </Suspense>
   );

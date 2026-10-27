@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Send, Loader2, Mic, Square } from "lucide-react";
+import { ArrowUp, Loader2, Mic, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/lib/supabase";
@@ -13,6 +13,8 @@ interface ChatInputProps {
   isDisabled: boolean;
   isStreaming: boolean;
   activeSessionId: string | null;
+  /** Disables only the send button (e.g. while a conversation is being created). */
+  isBusy?: boolean;
 }
 
 export function ChatInput({
@@ -20,6 +22,7 @@ export function ChatInput({
   isDisabled,
   isStreaming,
   activeSessionId,
+  isBusy,
 }: ChatInputProps) {
   const [input, setInput] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -129,7 +132,7 @@ export function ChatInput({
   }, [input]);
 
   const handleSend = () => {
-    if (!input.trim() || isDisabled) return;
+    if (!input.trim() || isDisabled || isBusy) return;
     onSendMessage(input.trim());
     setInput("");
   };
@@ -141,60 +144,64 @@ export function ChatInput({
     }
   };
 
-  if (!activeSessionId) return null;
-
   return (
-    <div className="border-t border-muted/50 bg-background p-4 md:p-6">
-      <div className="max-w-3xl mx-auto flex items-end gap-3 bg-muted/30 border border-muted/50 rounded-2xl p-2 focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/10 transition-all">
-        <Textarea
-          ref={textareaRef}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={isRecording ? "Recording speech active..." : "Ask your IELTS Mentor a question..."}
-          rows={1}
-          disabled={isDisabled || isRecording}
-          className="flex-1 min-h-[40px] max-h-[200px] border-0 bg-transparent px-3 py-2 text-sm shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 resize-none animate-none"
-        />
+    <div className="shrink-0 bg-sheet px-4 pt-2 pb-4 sm:px-6 sm:pb-6">
+      <div className="mx-auto max-w-[720px]">
+        <div className="flex items-end gap-2 rounded-[22px] border border-input bg-sheet p-2 pl-4 transition-[border-color] duration-[var(--duration-quick)] focus-within:border-teal">
+          <label htmlFor="mentor-question" className="sr-only">
+            Your question for the mentor
+          </label>
+          <Textarea
+            id="mentor-question"
+            ref={textareaRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={isRecording ? "Listening. Press stop when you finish." : "Ask about any part of the test"}
+            rows={1}
+            disabled={isDisabled || isRecording}
+            className="max-h-[200px] min-h-10 flex-1 resize-none border-0 bg-transparent px-0 py-2 text-base leading-normal focus-visible:border-0"
+          />
 
-        {/* Microphone voice input button */}
-        <Button
-          type="button"
-          onClick={toggleRecording}
-          disabled={isDisabled || isTranscribing}
-          variant={isRecording ? "destructive" : "ghost"}
-          size="icon"
-          className={cn(
-            "h-9 w-9 rounded-xl shrink-0 transition-all text-muted-foreground hover:text-foreground",
-            isRecording && "bg-rose-500 hover:bg-rose-600 text-white animate-pulse"
-          )}
-        >
-          {isTranscribing ? (
-            <Loader2 className="h-4.5 w-4.5 animate-spin" />
-          ) : isRecording ? (
-            <Square className="h-4 w-4 fill-current" />
-          ) : (
-            <Mic className="h-4.5 w-4.5" />
-          )}
-        </Button>
+          {/* Microphone voice input button */}
+          <Button
+            type="button"
+            onClick={toggleRecording}
+            disabled={isDisabled || isTranscribing}
+            variant={isRecording ? "default" : "ghost"}
+            size="icon"
+            aria-label={isTranscribing ? "Transcribing" : isRecording ? "Stop recording" : "Ask by voice"}
+            className={cn("shrink-0", !isRecording && "text-soft hover:text-ink")}
+          >
+            {isTranscribing ? (
+              <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
+            ) : isRecording ? (
+              <Square className="size-3.5 fill-current" />
+            ) : (
+              <Mic className="size-[18px]" />
+            )}
+          </Button>
 
-        <Button
-          type="button"
-          onClick={handleSend}
-          disabled={isDisabled || !input.trim() || isRecording}
-          size="icon"
-          className="h-9 w-9 rounded-xl shrink-0"
-        >
-          {isStreaming ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Send className="h-4 w-4" />
-          )}
-        </Button>
+          <Button
+            type="button"
+            onClick={handleSend}
+            disabled={isDisabled || isBusy || !input.trim() || isRecording}
+            variant="accent"
+            size="icon"
+            aria-label="Send"
+            className="shrink-0"
+          >
+            {isStreaming ? (
+              <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
+            ) : (
+              <ArrowUp className="size-[18px]" />
+            )}
+          </Button>
+        </div>
+        <p className="mt-2 hidden text-center text-[13px] text-soft sm:block">
+          Enter to send, Shift and Enter for a new line. Check advice against the official band descriptors.
+        </p>
       </div>
-      <p className="max-w-3xl mx-auto text-[10px] text-muted-foreground text-center mt-2.5">
-        AI responses are designed to support your IELTS studies. Always review detailed scoring guides.
-      </p>
     </div>
   );
 }

@@ -4,12 +4,12 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { OAUTH_NEXT_PATH_KEY, safeInternalPath } from "@/lib/auth-redirect";
-import { Loader2 } from "lucide-react";
+import { AuthFrame } from "@/components/auth/auth-frame";
 import { toast } from "sonner";
 
 export default function AuthCallbackPage() {
   const router = useRouter();
-  const [status, setStatus] = useState("Verifying connection...");
+  const [status, setStatus] = useState("Checking your sign-in");
 
   useEffect(() => {
     const nextPath = safeInternalPath(
@@ -39,21 +39,21 @@ export default function AuthCallbackPage() {
 
         if (error) {
           console.error("Auth callback session verification error:", error);
-          toast.error("Authentication failed: " + error.message);
+          toast.error("Sign-in failed: " + error.message);
           navigateOnce("/auth/login");
           return;
         }
 
         if (session) {
-          setStatus("Secure connection established. Setting up your workspace...");
-          toast.success("Successfully logged in!");
+          setStatus("Signed in. Opening your practice");
+          toast.success("Signed in.");
           navigateOnce(nextPath);
         } else {
           const { data } = supabase.auth.onAuthStateChange(
             async (event, currentSession) => {
               if (currentSession) {
-                setStatus("Session synchronized. Loading dashboard...");
-                toast.success("Successfully logged in!");
+                setStatus("Signed in. Opening your practice");
+                toast.success("Signed in.");
                 navigateOnce(nextPath);
               }
             }
@@ -67,7 +67,7 @@ export default function AuthCallbackPage() {
 
           timeoutId = setTimeout(() => {
             if (cancelled || hasNavigated) return;
-            toast.error("Authentication timed out. Please try logging in again.");
+            toast.error("Sign-in took too long. Try again.");
             navigateOnce("/auth/login");
           }, 6000);
         }
@@ -87,15 +87,12 @@ export default function AuthCallbackPage() {
   }, [router]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-radial from-background to-muted/20 px-4">
-      <div className="text-center space-y-4 max-w-sm p-6 bg-white rounded-2xl shadow-xl border border-slate-100">
-        <div className="relative flex justify-center">
-          <div className="absolute inset-0 bg-indigo-500/10 rounded-full blur-xl w-16 h-16 mx-auto animate-pulse" />
-          <Loader2 className="h-10 w-10 animate-spin text-indigo-950 relative" />
-        </div>
-        <h2 className="text-lg font-bold text-slate-800">Signing you in</h2>
-        <p className="text-sm text-slate-500">{status}</p>
-      </div>
-    </div>
+    <AuthFrame title="Signing you in">
+      <p role="status" aria-live="polite" className="text-[15px]">
+        <span key={status} className="t-swap inline-block">
+          <span className="t-shimmer">{status}</span>
+        </span>
+      </p>
+    </AuthFrame>
   );
 }

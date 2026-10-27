@@ -1,0 +1,33 @@
+/* Checkbox check (transitions.dev recipe 25): the box fills, then the tick draws itself. */
+.t-check {
+  transition:
+    background-color var(--duration-quick) var(--ease-smooth-out),
+    border-color var(--duration-quick) var(--ease-smooth-out),
+    transform var(--duration-quick) var(--ease-smooth-out);
+}
+.t-check:active {
+  transform: scale(var(--scale-medium));
+}
+.t-check svg path {
+  stroke-dasharray: var(--check-len, 15);
+  stroke-dashoffset: var(--check-len, 15);
+  transition: stroke-dashoffset var(--duration-quick) var(--ease-smooth-out);
+}
+.t-check[data-checked="true"] svg path {
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset var(--duration-medium) var(--ease-smooth-out);
+}
+
+/* Progress bar fill grows to its new ratio. */
+.t-progress-fill {
+  transform-origin: left center;
+  transition: transform var(--duration-slow) var(--ease-smooth-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-check,
+  .t-check svg path,
+  .t-progress-fill {
+    transition: none !important;
+  }
+}

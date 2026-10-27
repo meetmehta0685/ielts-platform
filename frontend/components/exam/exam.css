@@ -1,0 +1,196 @@
+/* Exam-mode motion, adapted from .taste-skill/transitions recipes onto the app's motion tokens. */
+
+/* 08 Page side-by-side: each exam paper enters from the right as the previous one leaves. */
+@keyframes x-stage-in {
+  from {
+    opacity: 0;
+    transform: translateX(var(--distance-base));
+    filter: blur(var(--blur-medium));
+  }
+}
+.x-stage {
+  animation: x-stage-in var(--duration-fast) var(--ease-smooth-out) both;
+}
+
+/* 10 Success check: the mark that confirms the answers were submitted and marked. */
+.x-check {
+  display: inline-block;
+  opacity: 0;
+}
+.x-check svg {
+  display: block;
+  overflow: visible;
+}
+.x-check svg path {
+  stroke-dasharray: 20;
+  stroke-dashoffset: 20;
+}
+.x-check[data-state="in"] {
+  animation:
+    x-check-fade var(--duration-very-slow) var(--ease-smooth-out) forwards,
+    x-check-rotate var(--duration-very-slow) var(--ease-smooth-out) forwards,
+    x-check-bob var(--duration-very-slow) var(--ease-bounce) forwards;
+}
+.x-check[data-state="in"] svg path {
+  animation: x-check-draw var(--duration-very-slow) var(--ease-smooth-out) var(--duration-micro) forwards;
+}
+@keyframes x-check-fade {
+  to {
+    opacity: 1;
+  }
+}
+@keyframes x-check-rotate {
+  from {
+    transform: rotate(80deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+@keyframes x-check-bob {
+  from {
+    translate: 0 12px;
+  }
+  to {
+    translate: 0 0;
+  }
+}
+@keyframes x-check-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* 02 Number pop-in: the band figure arrives digit by digit, the decimals staggered. */
+@keyframes x-digit-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--distance-base));
+    filter: blur(var(--blur-small));
+  }
+}
+.x-digits {
+  display: inline-flex;
+  align-items: baseline;
+}
+.x-digit {
+  display: inline-block;
+  animation: x-digit-in var(--duration-very-slow) var(--ease-bounce) both;
+  animation-delay: calc(var(--d, 0) * 70ms);
+}
+
+/* 06 Modal: the exit and submit confirmations scale up from 0.97 as the scrim fades in. */
+@keyframes x-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes x-modal-in {
+  from {
+    opacity: 0;
+    transform: scale(var(--scale-medium));
+  }
+}
+.x-scrim {
+  animation: x-fade-in var(--duration-fast) var(--ease-smooth-out) both;
+}
+.x-modal {
+  animation: x-modal-in var(--duration-fast) var(--ease-smooth-out) both;
+}
+
+/* The audio scrubber: a plain rule with a teal played portion. */
+.x-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 24px;
+  background: transparent;
+  cursor: pointer;
+}
+.x-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(to right, var(--teal) var(--played, 0%), var(--putty) var(--played, 0%));
+}
+.x-range::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--putty);
+}
+.x-range::-moz-range-progress {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--teal);
+}
+.x-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  border-radius: 999px;
+  background: var(--ink);
+  transition: transform var(--duration-quick) var(--ease-smooth-out);
+}
+.x-range::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--ink);
+}
+.x-range:hover::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+.x-range:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.x-range:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* Voice activity bars on the speaking tiles. */
+@keyframes x-level {
+  0%,
+  100% {
+    transform: scaleY(0.3);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+.x-level > span {
+  display: block;
+  width: 3px;
+  height: 14px;
+  border-radius: 2px;
+  background: currentColor;
+  transform-origin: bottom;
+  animation: x-level 900ms var(--ease-in-out) infinite;
+}
+.x-level > span:nth-child(2) {
+  animation-delay: 150ms;
+}
+.x-level > span:nth-child(3) {
+  animation-delay: 300ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .x-scrim,.x-modal,.x-stage,.x-digit {
+    animation: none !important;
+  }
+  .x-check {
+    animation: none !important;
+    opacity: 1;
+  }
+  .x-check svg path {
+    animation: none !important;
+    stroke-dashoffset: 0 !important;
+  }
+  .x-level > span {
+    animation: none !important;
+    transform: scaleY(0.6);
+  }
+}

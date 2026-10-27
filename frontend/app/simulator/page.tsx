@@ -1,16 +1,28 @@
 "use client";
 
-import { useState, useEffect, useRef, type CSSProperties } from "react";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { readSseEvents } from "@/lib/sse";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, ArrowLeft, Clock, BookOpen, Play, Pause, ArrowRight, PenTool } from "lucide-react";
+import { AppShell, PageColumn, Panel } from "@/components/app/app-shell";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  BandDigits,
+  ExamFrame,
+  SplitPane,
+  SuccessCheck,
+  candidateNameFrom,
+  passageSize,
+  stripPassagePrefix,
+  type TextScale,
+} from "@/components/exam/exam-frame";
+import { QuestionGroups, QuestionNavigator, type ExamQuestion } from "@/components/exam/question-field";
+import { AudioPlayer } from "@/components/exam/audio-player";
+import { cn } from "@/lib/utils";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -19,12 +31,7 @@ const SpeakingLiveKitRoom = dynamic(
   { ssr: false },
 );
 
-type Question = {
-  id: number;
-  type: "fill-gap" | "multiple-choice" | "true-false-not-given";
-  questionText: string;
-  options?: string[];
-};
+type Question = ExamQuestion;
 
 type ListeningTest = {
   id: string;
@@ -47,6 +54,13 @@ const STEP_SECONDS: Partial<Record<Step, number>> = {
   speaking: 12 * 60,
 };
 
+const PAPERS: { step: Exclude<Step, "intro" | "report">; name: string }[] = [
+  { step: "listening", name: "Listening" },
+  { step: "reading", name: "Reading" },
+  { step: "writing", name: "Writing" },
+  { step: "speaking", name: "Speaking" },
+];
+
 const createAttemptId = () =>
   typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
     ? crypto.randomUUID()
@@ -64,10 +78,21 @@ function calculateOverallIELTS(scores: number[]) {
 
 const formatBand = (score: number | null) => (score !== null ? score.toFixed(1) : "Not graded");
 
+const cefrLevel = (score: number | null) => {
+  if (score === null) return "—";
+  if (score >= 8.5) return "C2";
+  if (score >= 7.0) return "C1";
+  if (score >= 5.5) return "B2";
+  if (score >= 4.0) return "B1";
+  return "A2";
+};
+
 const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 const escapeHtml = (value: string) =>
   value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+
+const countWords = (text: string) => (text.trim() === "" ? 0 : text.trim().split(/\s+/).length);
 
 async function streamBandScore(response: Response) {
   let bandScore: number | null = null;
@@ -80,66 +105,41 @@ async function streamBandScore(response: Response) {
   return bandScore;
 }
 
-function QuestionField({
-  question,
-  value,
-  onChange,
-  disabled,
-  textSizeClass,
-}: {
-  question: Question;
-  value: string;
-  onChange: (value: string) => void;
-  disabled: boolean;
-  textSizeClass: string;
-}) {
-  const choices =
-    question.type === "true-false-not-given"
-      ? ["TRUE", "FALSE", "NOT GIVEN"].map((opt) => ({ label: opt, value: opt }))
-      : question.type === "multiple-choice"
-        ? (question.options ?? []).map((opt) => ({ label: opt, value: opt.charAt(0) }))
-        : null;
-
-  return (
-    <div className="p-4 border border-muted/50 bg-background rounded-xl space-y-3 shadow-xs">
-      <div className="text-[10px] font-bold text-muted-foreground uppercase font-mono">Question {question.id}</div>
-      <p className={`${textSizeClass} font-semibold leading-normal text-foreground`}>{question.questionText}</p>
-      {choices ? (
-        <div className={question.type === "multiple-choice" ? "flex flex-col gap-2" : "flex flex-wrap gap-2"}>
-          {choices.map((choice) => (
-            <button
-              key={choice.label}
-              type="button"
-              onClick={() => onChange(choice.value)}
-              className={`px-3 py-1.5 rounded-lg border font-bold text-xs text-left cursor-pointer transition-all ${
-                value === choice.value ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border text-foreground hover:bg-muted"
-              }`}
-              disabled={disabled}
-            >
-              {choice.label}
-            </button>
-          ))}
-        </div>
-      ) : (
-        <Input
-          placeholder="Type answer..."
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="h-8 text-xs"
-          disabled={disabled}
-        />
-      )}
+/** The paper could not be fetched: say so, and say what happens if they carry on. */
+function TestLoadingState({ error }: { error: string | null }) {
+  return error ? (
+    <div className="rounded-2xl bg-panel p-5">
+      <h2 className="text-[17px] font-semibold text-ink">This paper did not load.</h2>
+      <p className="mt-2 text-[15px] leading-normal text-soft">
+        {error}. Press Submit to move on; this paper will be marked Not graded.
+      </p>
+    </div>
+  ) : (
+    <div className="flex flex-col gap-3" aria-label="Loading the paper">
+      <p className="t-shimmer text-[15px]">Loading the paper</p>
+      <span className="t-skel block h-5 w-10/12" />
+      <span className="t-skel block h-5 w-9/12" />
+      <span className="t-skel block h-5 w-7/12" />
     </div>
   );
 }
 
-function TestLoadingState({ error }: { error: string | null }) {
-  return error ? (
-    <p className="text-sm text-destructive">Failed to load this test: {error}. Submit to continue; this module will be marked Not graded.</p>
-  ) : (
-    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-      <Loader2 className="h-4 w-4 animate-spin" /> Loading test...
+/** Shown over a paper while its answers are being marked. */
+function MarkingOverlay({ label }: { label: string }) {
+  return (
+    <div className="t-rise absolute inset-0 z-10 flex items-center justify-center bg-[rgba(255,255,255,0.86)]">
+      <p className="t-shimmer text-[17px] font-medium">{label}</p>
     </div>
+  );
+}
+
+function IntroRow({ name, what, time }: { name: string; what: ReactNode; time: string }) {
+  return (
+    <li className="grid grid-cols-[1fr_auto] items-baseline gap-x-4 gap-y-1 border-t border-[#e4e0d8] py-4 first:border-t-0 first:pt-0 sm:grid-cols-[120px_1fr_auto]">
+      <span className="text-[15px] font-medium text-ink">{name}</span>
+      <span className="tabular text-right text-[15px] text-ink sm:order-last">{time}</span>
+      <span className="col-span-2 text-[15px] leading-normal text-soft sm:col-span-1">{what}</span>
+    </li>
   );
 }
 
@@ -157,7 +157,7 @@ export default function SimulatorPage() {
 
   // CBT Configuration States
   const [isTimerHidden, setIsTimerHidden] = useState(false);
-  const [fontScale, setFontScale] = useState<"sm" | "base" | "lg">("base");
+  const [fontScale, setFontScale] = useState<TextScale>("base");
 
   // Timer states
   const [timeLeft, setTimeLeft] = useState(0);
@@ -185,6 +185,7 @@ export default function SimulatorPage() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioDuration, setAudioDuration] = useState(0);
   const [audioProgress, setAudioProgress] = useState(0);
+  const [audioStatus, setAudioStatus] = useState<"loading" | "ready" | "error">("loading");
 
   // ----------------------------------------------------
   // WRITING MODULE LOCAL STATES
@@ -209,7 +210,7 @@ export default function SimulatorPage() {
         } else {
           setToken(session.access_token);
           if (session.user) {
-            setCandidateName(session.user.email?.split("@")[0] || "Candidate");
+            setCandidateName(candidateNameFrom(session.user));
             setCandidateId(`ielts-${session.user.id.substring(0, 8)}`);
           }
         }
@@ -420,18 +421,6 @@ export default function SimulatorPage() {
     }
   };
 
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = Math.floor(seconds % 60);
-    return `${m}:${s < 10 ? "0" : ""}${s}`;
-  };
-
-  const getTextSizeClass = () => {
-    if (fontScale === "sm") return "text-xs";
-    if (fontScale === "lg") return "text-base";
-    return "text-sm";
-  };
-
   const moduleScores = [
     { module: "Listening", score: listeningScore },
     { module: "Reading", score: readingScore },
@@ -444,6 +433,10 @@ export default function SimulatorPage() {
   const overallScore =
     gradedModules.length > 0 ? calculateOverallIELTS(gradedModules.map((item) => item.score)) : null;
 
+  const weakest = [...gradedModules].sort((a, b) => a.score - b.score)[0];
+  const ungraded = moduleScores.filter((item) => item.score === null).map((item) => item.module);
+  const testDate = new Date().toLocaleDateString("en-GB", { year: "numeric", month: "long", day: "numeric" });
+
   const handleDownloadTRF = () => {
     const printWindow = window.open("", "_blank", "width=850,height=900");
     if (!printWindow) {
@@ -451,24 +444,8 @@ export default function SimulatorPage() {
       return;
     }
 
-    const testDate = new Date().toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    });
-
-    const cefrLevel = (score: number | null) => {
-      if (score === null) return "—";
-      if (score >= 8.5) return "C2";
-      if (score >= 7.0) return "C1";
-      if (score >= 5.5) return "B2";
-      if (score >= 4.0) return "B1";
-      return "A2";
-    };
-
     const name = escapeHtml(candidateName);
     const overall = overallScore !== null ? overallScore.toFixed(1) : "—";
-    const weakest = [...gradedModules].sort((a, b) => a.score - b.score)[0];
     const securityCode = (examAttemptId ?? "").replace(/[^a-zA-Z0-9]/g, "").slice(0, 6).toUpperCase();
     const ungradedNote =
       gradedModules.length < moduleScores.length
@@ -478,175 +455,85 @@ export default function SimulatorPage() {
       ? `Candidate ${name} achieved an overall Band score of ${overall}.${ungradedNote} Based on diagnostic subscores, key improvement areas remain in ${weakest.module} module practice. Prioritizing structured grammar feedback, expanding lexical resource variety, and sitting simulated exams under strict countdown constraints will assist in securing a target score of Band 7.5+.`
       : `No module could be graded in this attempt, so no band score is reported. Please retake the simulation.`;
 
+    const cell = (label: string, score: number | null) => `
+      <div class="cell">
+        <div class="label">${label}</div>
+        <div class="${score === null ? "value ungraded" : "value"}">${formatBand(score)}</div>
+      </div>`;
+
     const trfHtml = `
       <!DOCTYPE html>
-      <html>
+      <html lang="en">
         <head>
-          <title>IELTS Test Report Form - ${name}</title>
-          <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800;900&family=Courier+Prime&display=swap" rel="stylesheet">
-          <script src="https://cdn.tailwindcss.com"></script>
+          <meta charset="utf-8" />
+          <title>Mock Test Report Form - ${name}</title>
+          <link href="https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600&f[]=gambarino@400&display=swap" rel="stylesheet">
           <style>
+            * { box-sizing: border-box; }
+            body { margin: 0; padding: 40px 16px; background: #ebe8e2; color: #0a0a0a;
+              font-family: "General Sans", ui-sans-serif, system-ui, sans-serif; font-size: 15px; line-height: 1.5; }
+            .bar { max-width: 800px; margin: 0 auto 16px; display: flex; gap: 8px; justify-content: flex-end; }
+            .bar button { height: 40px; padding: 0 20px; border: 0; border-radius: 999px; font: inherit; font-weight: 500; cursor: pointer; }
+            .primary { background: #256f82; color: #fff; }
+            .secondary { background: #ece9e3; color: #0a0a0a; }
+            .sheet { max-width: 800px; margin: 0 auto; background: #fff; border: 1px solid #e4e0d8; border-radius: 16px; padding: 40px; }
+            .head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding-bottom: 20px; border-bottom: 1px solid #e4e0d8; }
+            h1 { font-family: "Gambarino", Georgia, serif; font-weight: 400; font-size: 40px; line-height: 0.92; margin: 0; }
+            .soft { color: #5c5852; }
+            .details { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding: 20px 0; border-bottom: 1px solid #e4e0d8; }
+            .label { font-size: 13px; color: #5c5852; }
+            .scores { display: grid; grid-template-columns: repeat(4, 1fr) 1.4fr; margin-top: 24px; border: 1px solid #e4e0d8; border-radius: 12px; overflow: hidden; }
+            .cell { padding: 16px; border-left: 1px solid #e4e0d8; }
+            .cell:first-child { border-left: 0; }
+            .value { font-size: 32px; font-variant-numeric: tabular-nums; margin-top: 8px; }
+            .value.ungraded { font-size: 15px; color: #5c5852; margin-top: 18px; }
+            .overall { background: #f5f3ef; }
+            .overall .value { font-family: "Gambarino", Georgia, serif; font-size: 64px; line-height: 0.92; }
+            .note { margin-top: 24px; padding: 16px; background: #f5f3ef; border-radius: 12px; font-size: 14px; color: #5c5852; }
+            .foot { margin-top: 24px; display: flex; justify-content: space-between; gap: 16px; font-size: 13px; color: #5c5852; }
+            @media (max-width: 640px) {
+              .sheet { padding: 24px; }
+              .details, .scores { grid-template-columns: 1fr 1fr; }
+              .cell { border-top: 1px solid #e4e0d8; }
+              .cell:nth-child(odd) { border-left: 0; }
+              .overall { grid-column: span 2; }
+            }
             @media print {
-              body {
-                background: white;
-                color: black;
-                padding: 0;
-                margin: 0;
-              }
-              .no-print {
-                display: none;
-              }
-              .print-container {
-                border: none !important;
-                box-shadow: none !important;
-                padding: 0 !important;
-                margin: 0 !important;
-              }
-            }
-            body {
-              font-family: 'Outfit', sans-serif;
-              background-color: #f7f6f2;
-            }
-            .certificate-border {
-              border: 8px double #1e3a8a;
+              body { background: #fff; padding: 0; }
+              .bar { display: none; }
+              .sheet { border: 0; padding: 0; }
             }
           </style>
         </head>
-        <body class="p-6 md:p-12 flex flex-col items-center">
-          <div class="no-print mb-6 flex gap-4">
-            <button onclick="window.print()" class="bg-blue-950 hover:bg-blue-900 text-white font-bold px-6 py-2.5 rounded-xl shadow-md transition-all">
-              Save as PDF / Print
-            </button>
-            <button onclick="window.close()" class="bg-stone-200 hover:bg-stone-300 text-slate-700 font-bold px-6 py-2.5 rounded-xl transition-all">
-              Close Window
-            </button>
+        <body>
+          <div class="bar">
+            <button class="secondary" onclick="window.close()">Close</button>
+            <button class="primary" onclick="window.print()">Save as PDF or print</button>
           </div>
-
-          <div class="print-container bg-white w-full max-w-[800px] p-8 md:p-12 rounded-3xl shadow-xl certificate-border relative text-slate-800">
-            <!-- Corner Decorative Elements -->
-            <div class="absolute top-4 left-4 w-12 h-12 border-t-4 border-l-4 border-amber-500/40 rounded-tl-lg pointer-events-none"></div>
-            <div class="absolute top-4 right-4 w-12 h-12 border-t-4 border-r-4 border-amber-500/40 rounded-tr-lg pointer-events-none"></div>
-            <div class="absolute bottom-4 left-4 w-12 h-12 border-b-4 border-l-4 border-amber-500/40 rounded-bl-lg pointer-events-none"></div>
-            <div class="absolute bottom-4 right-4 w-12 h-12 border-b-4 border-r-4 border-amber-500/40 rounded-br-lg pointer-events-none"></div>
-
-            <!-- Header Logos -->
-            <div class="flex justify-between items-center border-b-2 border-stone-200 pb-6 mb-8">
-              <div class="flex flex-col">
-                <span class="text-3xl font-black tracking-tighter text-blue-950">IELTS</span>
-                <span class="text-[10px] uppercase font-bold text-slate-400 tracking-wider">English Language Testing System</span>
-              </div>
-              <div class="text-right">
-                <span class="px-4 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-800 text-xs font-bold uppercase tracking-widest">
-                  Academic Test Report
-                </span>
-              </div>
+          <div class="sheet">
+            <div class="head">
+              <h1>Test Report Form</h1>
+              <span class="soft">Academic · computer-delivered mock</span>
             </div>
-
-            <div class="text-center mb-8">
-              <h1 class="text-2xl font-black text-blue-950 uppercase tracking-wide">Test Report Form</h1>
-              <p class="text-xs text-slate-500 mt-1">Admission & Assessment Verification Services</p>
+            <div class="details">
+              <div><div class="label">Candidate name</div><div>${name}</div></div>
+              <div><div class="label">Candidate number</div><div>${candidateId.toUpperCase()}</div></div>
+              <div><div class="label">Test date</div><div>${testDate}</div></div>
+              <div><div class="label">CEFR level</div><div>${cefrLevel(overallScore)}</div></div>
             </div>
-
-            <!-- Candidate Details Info Section -->
-            <div class="grid grid-cols-1 md:grid-cols-12 gap-8 mb-8">
-              
-              <!-- Profile Avatar / Box -->
-              <div class="md:col-span-3 flex flex-col items-center justify-center">
-                <div class="w-32 h-40 bg-stone-100 border border-stone-300 rounded-xl flex flex-col items-center justify-center text-center p-4 relative overflow-hidden shadow-inner">
-                  <div class="text-4xl mb-2">👤</div>
-                  <span class="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Candidate Photo</span>
-                  <div class="absolute bottom-0 left-0 w-full bg-slate-900/5 py-1 text-[8px] text-slate-500 uppercase tracking-widest font-mono">
-                    Verified Digital
-                  </div>
-                </div>
-              </div>
-
-              <!-- Text Fields -->
-              <div class="md:col-span-9 grid grid-cols-2 gap-y-4 gap-x-6 text-sm border-l border-stone-100 pl-0 md:pl-8">
-                <div>
-                  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Candidate Name</span>
-                  <span class="font-extrabold text-slate-800 capitalize text-base">${name}</span>
-                </div>
-                <div>
-                  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Candidate Number</span>
-                  <span class="font-bold text-slate-800 font-mono">${candidateId.toUpperCase()}</span>
-                </div>
-                <div>
-                  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Exam Date</span>
-                  <span class="font-semibold text-slate-700">${testDate}</span>
-                </div>
-                <div>
-                  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Center Number</span>
-                  <span class="font-bold text-slate-800 font-mono">AI-MTR-01</span>
-                </div>
-                <div>
-                  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Scheme Code</span>
-                  <span class="font-semibold text-slate-700 font-mono">CBT - EXAM</span>
-                </div>
-                <div>
-                  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">CEFR Level Equivalency</span>
-                  <span class="font-bold text-blue-900">${cefrLevel(overallScore)}</span>
-                </div>
+            <div class="scores">
+              ${cell("Listening", listeningScore)}
+              ${cell("Reading", readingScore)}
+              ${cell("Writing", writingScore)}
+              ${cell("Speaking", speakingScore)}
+              <div class="cell overall">
+                <div class="label">Overall band</div>
+                <div class="value">${overall}</div>
               </div>
             </div>
-
-            <!-- Test Results Table -->
-            <div class="border-2 border-slate-200 rounded-2xl overflow-hidden mb-8">
-              <table class="w-full text-center text-sm">
-                <thead>
-                  <tr class="bg-stone-50 border-b-2 border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[10px]">
-                    <th class="py-3 px-4">Listening</th>
-                    <th class="py-3 px-4 border-l border-slate-200">Reading</th>
-                    <th class="py-3 px-4 border-l border-slate-200">Writing</th>
-                    <th class="py-3 px-4 border-l border-slate-200">Speaking</th>
-                    <th class="py-3 px-4 border-l border-slate-200 bg-amber-500/10 text-amber-950 font-black">Overall Band</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr class="font-extrabold text-slate-800 text-base">
-                    <td class="py-4 px-4 font-mono">${formatBand(listeningScore)}</td>
-                    <td class="py-4 px-4 border-l border-slate-200 font-mono">${formatBand(readingScore)}</td>
-                    <td class="py-4 px-4 border-l border-slate-200 font-mono">${formatBand(writingScore)}</td>
-                    <td class="py-4 px-4 border-l border-slate-200 font-mono">${formatBand(speakingScore)}</td>
-                    <td class="py-4 px-4 border-l border-slate-200 bg-amber-500/10 text-xl font-black text-blue-950 font-mono">${overall}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            <!-- AI Advisor Strategist comments -->
-            <div class="bg-stone-50 border border-stone-200 rounded-xl p-5 mb-8">
-              <h3 class="font-bold text-xs text-blue-950 uppercase tracking-widest mb-2 flex items-center gap-1">
-                <span>🌟</span> AI Coach Recommendations & Strategy
-              </h3>
-              <p class="text-xs text-slate-600 leading-relaxed font-medium">
-                ${summary}
-              </p>
-            </div>
-
-            <!-- Validation stamps and signatures -->
-            <div class="flex justify-between items-end pt-4">
-              <div class="text-left">
-                <div class="h-10 w-24 mb-1 flex items-center justify-center italic text-xs text-slate-400 font-mono">
-                  Sarah Jenkins
-                </div>
-                <span class="text-[9px] font-bold text-slate-400 uppercase tracking-wider block border-t border-stone-200 pt-1">
-                  Administrator Signature
-                </span>
-              </div>
-              <div class="text-center relative">
-                <div class="absolute -top-12 -left-6 w-20 h-20 rounded-full border-4 border-dashed border-red-500/25 flex items-center justify-center text-[7px] text-red-500/40 uppercase font-black tracking-widest rotate-12 pointer-events-none">
-                  AI Certified
-                </div>
-                <span class="text-[9px] font-bold text-slate-400 uppercase tracking-wider block border-t border-stone-200 pt-1">
-                  Validation Stamp
-                </span>
-              </div>
-            </div>
-
-            <!-- Document Footer -->
-            <div class="mt-8 pt-4 border-t border-stone-100 flex justify-between text-[8px] text-slate-400 font-mono">
-              <span>Security Code: IELTS-AI-${securityCode}</span>
+            <div class="note">${summary}</div>
+            <div class="foot">
+              <span>Security code IELTS-AI-${securityCode}</span>
               <span>This is an AI-generated mock exam record for training purposes.</span>
             </div>
           </div>
@@ -660,423 +547,375 @@ export default function SimulatorPage() {
 
   if (isAuthLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <div className="text-center space-y-4">
-          <Loader2 className="h-10 w-10 animate-spin text-primary mx-auto" />
-          <p className="text-sm text-muted-foreground">Initializing Exam Simulator...</p>
-        </div>
-      </div>
+      <AppShell title="Full mock test">
+        <PageColumn title={<span className="t-shimmer">Preparing your mock test</span>}>
+          <div className="t-skel h-[300px] rounded-2xl" aria-hidden />
+        </PageColumn>
+      </AppShell>
     );
   }
 
-  return (
-    <div className="min-h-screen bg-muted/20 flex flex-col justify-between" style={{
-      "--scrollbar-thumb": "rgba(100, 116, 139, 0.4)",
-      "--scrollbar-track": "rgba(241, 245, 249, 0.5)"
-    } as CSSProperties}>
-      {/* Dynamic Voice Pulse style */}
-      <style>{`
-        @keyframes speak-pulse {
-          0%, 100% { height: 4px; }
-          50% { height: 28px; }
-        }
-        .speaking-bar {
-          animation: speak-pulse 1s ease-in-out infinite;
-        }
-      `}</style>
+  const textClass = fontScale === "lg" ? "text-[18px]" : fontScale === "sm" ? "text-[15px]" : "text-[16px]";
 
-      {/* Top CBT Navigation Header (shows during modules, not in report/intro) */}
-      {step !== "intro" && step !== "report" ? (
-        <header className="sticky top-0 z-10 border-b border-muted/50 bg-[#333f48] text-white px-6 h-16 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
-            <a href="/dashboard">
-              <Button variant="ghost" size="icon" className="h-8 w-8 mr-1 text-white hover:bg-white/10">
-                <ArrowLeft className="h-4 w-4" />
-              </Button>
-            </a>
-            <span className="font-bold tracking-tight text-white capitalize">IELTS CBT Mock Test - {step}</span>
-          </div>
-
-          {/* Center: CBT Timer */}
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2 bg-[#222a30] text-white px-4 py-1.5 rounded-md border border-white/10 text-sm font-bold font-mono">
-              <Clock className="h-4 w-4 text-[#ffc72c] animate-pulse" />
-              <span>{isTimerHidden ? "--:--" : formatTime(timeLeft)}</span>
-            </div>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => setIsTimerHidden(!isTimerHidden)}
-              className="text-xs h-8 border-white/20 text-white bg-transparent hover:bg-white/10 hover:text-white"
-            >
-              {isTimerHidden ? "Show Time" : "Hide Time"}
-            </Button>
-          </div>
-
-          <div className="flex items-center gap-4">
-            {/* Font Resizing Controls */}
-            <div className="flex items-center gap-1 bg-[#222a30] rounded-md p-1 border border-white/10">
-              <Button 
-                size="icon" 
-                variant="ghost" 
-                onClick={() => setFontScale("sm")}
-                className={`h-7 w-7 text-xs ${fontScale === "sm" ? "bg-primary text-white" : "text-white/70"}`}
-              >
-                A-
-              </Button>
-              <Button 
-                size="icon" 
-                variant="ghost" 
-                onClick={() => setFontScale("base")}
-                className={`h-7 w-7 text-xs ${fontScale === "base" ? "bg-primary text-white" : "text-white/70"}`}
-              >
-                A
-              </Button>
-              <Button 
-                size="icon" 
-                variant="ghost" 
-                onClick={() => setFontScale("lg")}
-                className={`h-7 w-7 text-xs ${fontScale === "lg" ? "bg-primary text-white" : "text-white/70"}`}
-              >
-                A+
-              </Button>
-            </div>
-
-            {/* Candidate Info */}
-            <div className="hidden md:flex flex-col items-end text-xs">
-              <span className="font-bold text-white/95 capitalize">{candidateName}</span>
-              <span className="text-white/60 font-mono text-[10px]">{candidateId}</span>
-            </div>
-
-            <a href="/dashboard" className="text-xs font-bold text-[#ffc72c] hover:underline">
-              Exit
-            </a>
-          </div>
-        </header>
+  // ----------------------------------------------------
+  // INTRO
+  // ----------------------------------------------------
+  if (step === "intro") {
+    const listeningCount = listeningTest?.sections.flatMap((s) => s.questions).length;
+    const readingCount = readingTest?.passages.flatMap((p) => p.questions).length;
+    const paperLine = (count: number | undefined, title: string | undefined, noun: string) =>
+      count !== undefined ? (
+        <span className="t-revealed">
+          {count} questions · {title}
+        </span>
+      ) : testsError ? (
+        <span className="text-bad">Did not load; it will be marked Not graded</span>
       ) : (
-        <header className="sticky top-0 z-10 border-b border-muted/50 bg-background px-6 h-16 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
-            <a href="/dashboard">
-              <Button variant="ghost" size="icon" className="h-8 w-8 mr-1">
-                <ArrowLeft className="h-4 w-4" />
+        <span className="t-skel inline-block h-4 w-48 align-middle" aria-label={`Loading the ${noun} paper`} />
+      );
+    return (
+      <AppShell title="Full mock test">
+        <PageColumn
+          title="Four papers, 2 hours 42 minutes."
+          lead="Listening, Reading, Writing and Speaking in one sitting, in the order of the real test."
+          actions={
+            <Button variant="accent" size="lg" onClick={startSimulation}>
+              Start the mock
+            </Button>
+          }
+        >
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+            <Panel className="lg:col-span-8" title="The order of the day" aside="Time allowed">
+              <ol>
+                <IntroRow name="Listening" what={paperLine(listeningCount, listeningTest?.title, "listening")} time="30:00" />
+                <IntroRow name="Reading" what={paperLine(readingCount, readingTest?.title, "reading")} time="60:00" />
+                <IntroRow name="Writing" what="Task 2 essay, at least 250 words" time="60:00" />
+                <IntroRow name="Speaking" what="Live interview with the AI examiner, Parts 1 to 3" time="12:00" />
+              </ol>
+            </Panel>
+            <Panel className="lg:col-span-4" title="Before you start">
+              <ul className="flex flex-col gap-2 text-[15px] leading-normal text-soft">
+                <li>Each paper has its own clock. At 0:00 it submits and the next paper opens.</li>
+                <li>Speaking needs a microphone and camera; your browser will ask when that paper starts.</li>
+                <li>A paper that cannot be marked shows as Not graded and stays out of the overall band.</li>
+              </ul>
+            </Panel>
+          </div>
+        </PageColumn>
+      </AppShell>
+    );
+  }
+
+  // ----------------------------------------------------
+  // REPORT
+  // ----------------------------------------------------
+  if (step === "report") {
+    return (
+      <AppShell title="Full mock test">
+        <PageColumn
+          title={overallScore !== null ? "Your mock test report." : "No paper could be graded."}
+          lead={
+            overallScore === null
+              ? "Nothing was marked in this sitting, so no band is reported. You can sit the mock again."
+              : ungraded.length > 0
+                ? `${gradedModules.length} of 4 papers graded. ${ungraded.join(" and ")} could not be marked and ${ungraded.length === 1 ? "is" : "are"} left out of the overall band.`
+                : `All four papers graded on ${testDate}.`
+          }
+          actions={
+            <>
+              <Button variant="secondary" asChild>
+                <Link href="/dashboard">Back to home</Link>
               </Button>
-            </a>
-            <span className="font-extrabold text-foreground tracking-tight">IELTS Exam Simulator</span>
-          </div>
-          <span className="text-xs uppercase font-bold text-muted-foreground bg-muted border px-2.5 py-1 rounded-md">
-            Exam Mode
-          </span>
-        </header>
-      )}
-
-      {/* Main Workspace content */}
-      <div className="flex-1 flex overflow-hidden justify-center items-center">
-        
-        {/* STEP 1: INTRO */}
-        {step === "intro" && (
-          <div className="w-full max-w-4xl p-6 md:p-12 overflow-y-auto">
-            <Card className="shadow-md border-muted/50">
-              <CardHeader className="text-center space-y-2">
-                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground text-xl font-black shadow-sm">
-                  I
+              <Button variant="accent" onClick={handleDownloadTRF}>
+                Download TRF
+              </Button>
+            </>
+          }
+        >
+          <Panel
+            title="Test report form"
+            aside={
+              <span className="inline-flex items-center gap-1.5">
+                <SuccessCheck />
+                Mock complete
+              </span>
+            }
+          >
+            <div className="rounded-2xl border border-[#e4e0d8] bg-sheet p-5 sm:p-6">
+              <dl className="grid grid-cols-2 gap-4 border-b border-[#e4e0d8] pb-5 md:grid-cols-4">
+                <div>
+                  <dt className="text-[13px] text-soft">Candidate name</dt>
+                  <dd className="mt-0.5 text-[15px] text-ink">{candidateName}</dd>
                 </div>
-                <CardTitle className="text-2xl font-black">Full IELTS CBT Mock Examination</CardTitle>
-                <CardDescription className="max-w-md mx-auto">
-                  Experience a complete computer-based test under realistic timing, layouts, and grading pipelines.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6 max-w-xl mx-auto">
-                <div className="grid grid-cols-2 gap-4">
-                  {[
-                    { label: "1. Listening Mock", desc: "Orientation Lecture (30 mins)" },
-                    { label: "2. Reading Mock", desc: "AI Passage (60 mins)" },
-                    { label: "3. Writing Mock", desc: "Globalization Essay (60 mins)" },
-                    { label: "4. Speaking VCS Interview", desc: "Dr. Jenkins (11-14 mins)" },
-                  ].map((m, idx) => (
-                    <div key={idx} className="p-3 border border-muted/50 rounded-xl bg-background text-xs space-y-0.5">
-                      <div className="font-bold text-foreground">{m.label}</div>
-                      <div className="text-muted-foreground">{m.desc}</div>
-                    </div>
-                  ))}
+                <div>
+                  <dt className="text-[13px] text-soft">Candidate number</dt>
+                  <dd className="tabular mt-0.5 text-[15px] text-ink">{candidateId.toUpperCase()}</dd>
                 </div>
-
-                <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 text-xs text-primary leading-relaxed">
-                  <strong>Important:</strong> Timers are strictly enforced for each section. When a timer expires, your answers will auto-submit. Ensure your microphone is ready for the speaking interview.
+                <div>
+                  <dt className="text-[13px] text-soft">Test date</dt>
+                  <dd className="mt-0.5 text-[15px] text-ink">{testDate}</dd>
                 </div>
+                <div>
+                  <dt className="text-[13px] text-soft">CEFR level</dt>
+                  <dd className="mt-0.5 text-[15px] text-ink">{cefrLevel(overallScore)}</dd>
+                </div>
+              </dl>
 
-                <Button onClick={startSimulation} className="w-full h-11">
-                  Start Examination <ArrowRight className="h-4 w-4 ml-1.5" />
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
-        )}
-
-        {/* STEP 2: LISTENING */}
-        {step === "listening" && (
-          <div className="w-full max-w-4xl p-6 md:p-12 overflow-y-auto">
-            <Card className="shadow-md border-muted/50">
-              <CardHeader className="pb-3 border-b border-muted/30">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <CardTitle className="text-lg font-bold">Step 1: Listening Module</CardTitle>
-                    <CardDescription>
-                      {listeningTest?.sections[0]?.instructions ?? "Listen to the audio and answer the questions."}
-                    </CardDescription>
+              <div className="mt-5 grid grid-cols-2 overflow-hidden rounded-xl border border-[#e4e0d8] md:grid-cols-[repeat(4,1fr)_1.5fr]">
+                {moduleScores.map((item, i) => (
+                  <div
+                    key={item.module}
+                    className={cn(
+                      "border-[#e4e0d8] p-4",
+                      i % 2 === 1 && "border-l",
+                      i >= 2 && "border-t md:border-t-0",
+                      i > 0 && "md:border-l"
+                    )}
+                  >
+                    <p className="text-[13px] text-soft">{item.module}</p>
+                    {item.score !== null ? (
+                      <p className="tabular mt-2 text-[40px] leading-none text-ink">{item.score.toFixed(1)}</p>
+                    ) : (
+                      <p className="mt-4 text-[15px] text-soft">Not graded</p>
+                    )}
                   </div>
-                  <span className="text-xs font-mono font-bold text-muted-foreground bg-muted border px-2 py-0.5 rounded-sm">Part 1</span>
+                ))}
+                <div className="col-span-2 border-t border-[#e4e0d8] bg-panel p-4 md:col-span-1 md:border-t-0 md:border-l">
+                  <p className="text-[13px] text-soft">Overall band</p>
+                  <p className="mt-2 font-display text-[104px] leading-[0.92] text-ink">
+                    {overallScore !== null ? <BandDigits value={overallScore.toFixed(1)} /> : "—"}
+                  </p>
                 </div>
-              </CardHeader>
-              <CardContent className="p-6 space-y-6">
-                {listeningTest ? (
-                  <>
-                    <audio
-                      ref={audioRef}
-                      src={listeningTest.sections[0]?.audioUrl}
-                      onTimeUpdate={() => setAudioProgress(audioRef.current?.currentTime || 0)}
-                      onLoadedMetadata={() => setAudioDuration(audioRef.current?.duration || 0)}
-                      onEnded={() => setIsPlaying(false)}
+              </div>
+
+              <p className="mt-5 text-[15px] leading-normal text-soft">
+                {overallScore === null
+                  ? "No paper was marked, so there is no overall band or CEFR level for this sitting."
+                  : weakest
+                    ? `Weakest paper: ${weakest.module}, Band ${weakest.score.toFixed(1)}. Start your next week of practice there.`
+                    : null}
+              </p>
+            </div>
+          </Panel>
+        </PageColumn>
+      </AppShell>
+    );
+  }
+
+  // ----------------------------------------------------
+  // PAPERS, each in the exam frame
+  // ----------------------------------------------------
+  const paperIndex = PAPERS.findIndex((p) => p.step === step);
+  const paper = PAPERS[paperIndex];
+  const listeningQuestions = listeningTest?.sections.flatMap((section) => section.questions) ?? [];
+  const readingQuestions = readingTest?.passages.flatMap((passage) => passage.questions) ?? [];
+  const unansweredIn = (questions: Question[], answers: Record<number, string>) =>
+    questions.filter((q) => (answers[q.id] ?? "").trim() === "").length;
+  const words = countWords(essay);
+
+  const submitConfirm =
+    step === "listening" && listeningQuestions.length > 0 && unansweredIn(listeningQuestions, listeningAnswers) > 0
+      ? `${unansweredIn(listeningQuestions, listeningAnswers)} of ${listeningQuestions.length} listening questions are unanswered and will score zero. Reading opens next.`
+      : step === "reading" && readingQuestions.length > 0 && unansweredIn(readingQuestions, readingAnswers) > 0
+        ? `${unansweredIn(readingQuestions, readingAnswers)} of ${readingQuestions.length} reading questions are unanswered and will score zero. Writing opens next.`
+        : step === "writing"
+          ? words < 250
+            ? `Your essay is ${words} words. Task 2 asks for at least 250, and short essays lose marks. Speaking opens next.`
+            : "Submit your essay? Speaking opens next."
+          : step === "speaking"
+            ? "This ends the interview and opens your report. If the examiner heard too little, Speaking will be marked Not graded."
+            : null;
+
+  const markingLabel =
+    step === "listening" ? "Marking your listening answers"
+      : step === "reading" ? "Marking your reading answers"
+        : step === "writing" ? "Marking your essay"
+          : "Marking your speaking";
+
+  return (
+    <ExamFrame
+      module={paper?.name ?? "Mock test"}
+      context={`Full mock · paper ${paperIndex + 1} of 4`}
+      candidateName={candidateName}
+      timeLeft={timeLeft}
+      timerHidden={isTimerHidden}
+      onToggleTimer={() => setIsTimerHidden(!isTimerHidden)}
+      textScale={step === "speaking" ? undefined : fontScale}
+      onTextScale={setFontScale}
+      submitLabel={step === "speaking" ? "Finish" : "Submit"}
+      submitting={isProcessingStep}
+      submitDisabled={(step === "listening" && !listeningTest && !testsError) || (step === "reading" && !readingTest && !testsError)}
+      onSubmit={() => finishCurrentStepRef.current?.()}
+      submitConfirm={submitConfirm}
+      exitBody="Leaving ends this mock. Nothing is saved until the report, so your papers so far will be lost."
+      footer={
+        step === "listening" && listeningTest ? (
+          <QuestionNavigator questions={listeningQuestions} answers={listeningAnswers} />
+        ) : step === "reading" && readingTest ? (
+          <QuestionNavigator questions={readingQuestions} answers={readingAnswers} />
+        ) : undefined
+      }
+    >
+      <div key={step} className="x-stage relative h-full">
+        {isProcessingStep && <MarkingOverlay label={markingLabel} />}
+
+        {/* LISTENING */}
+        {step === "listening" && (
+          <div className="h-full overflow-y-auto">
+            <div className="mx-auto max-w-[760px] px-5 py-8 sm:px-8 lg:py-12">
+              {listeningTest ? (
+                <>
+                  <audio
+                    ref={audioRef}
+                    src={listeningTest.sections[0]?.audioUrl}
+                    preload="metadata"
+                    onTimeUpdate={() => setAudioProgress(audioRef.current?.currentTime || 0)}
+                    onLoadedMetadata={() => {
+                      setAudioDuration(audioRef.current?.duration || 0);
+                      setAudioStatus("ready");
+                    }}
+                    onEnded={() => setIsPlaying(false)}
+                    onError={() => setAudioStatus("error")}
+                  />
+                  <p className="text-[14px] text-soft">Part {listeningTest.sections[0]?.id ?? 1}</p>
+                  <h1 className="mt-1 text-[26px] font-medium leading-tight text-ink">
+                    {listeningTest.sections[0]?.instructions ?? "Listen to the audio and answer the questions."}
+                  </h1>
+                  <div className="mt-6">
+                    <AudioPlayer
+                      title={listeningTest.title}
+                      isPlaying={isPlaying}
+                      progress={audioProgress}
+                      duration={audioDuration}
+                      status={audioStatus}
+                      onToggle={toggleListeningPlay}
+                      onSeek={(val) => {
+                        if (audioRef.current) audioRef.current.currentTime = val;
+                        setAudioProgress(val);
+                      }}
+                      disabled={isProcessingStep}
                     />
-
-                    <div className="flex items-center gap-4 border border-muted/40 p-4 rounded-xl bg-muted/10">
-                      <Button
-                        onClick={toggleListeningPlay}
-                        size="icon"
-                        className="h-10 w-10 rounded-full"
-                        disabled={isProcessingStep}
-                      >
-                        {isPlaying ? <Pause className="h-4 w-4 fill-current" /> : <Play className="h-4 w-4 fill-current ml-0.5" />}
-                      </Button>
-                      <div className="flex-1 space-y-0.5">
-                        <div className="text-xs font-bold text-primary">{listeningTest.title}</div>
-                        <input
-                          type="range"
-                          min="0"
-                          max={audioDuration || 100}
-                          value={audioProgress}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value);
-                            if (audioRef.current) audioRef.current.currentTime = val;
-                            setAudioProgress(val);
-                          }}
-                          className="w-full h-1 bg-muted rounded appearance-none accent-primary cursor-pointer"
-                          disabled={isProcessingStep}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {listeningTest.sections.flatMap((section) => section.questions).map((q) => (
-                        <QuestionField
-                          key={q.id}
-                          question={q}
-                          value={listeningAnswers[q.id] || ""}
-                          onChange={(value) => setListeningAnswers((prev) => ({ ...prev, [q.id]: value }))}
-                          disabled={isProcessingStep}
-                          textSizeClass={getTextSizeClass()}
-                        />
-                      ))}
-                    </div>
-                  </>
-                ) : (
-                  <TestLoadingState error={testsError} />
-                )}
-
-                <Button onClick={handleFinishListening} className="w-full h-11" disabled={isProcessingStep || (!listeningTest && !testsError)}>
-                  {isProcessingStep ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit & Continue to Reading"}
-                </Button>
-              </CardContent>
-            </Card>
+                  </div>
+                  <div className="mt-10">
+                    <QuestionGroups
+                      questions={listeningQuestions}
+                      answers={listeningAnswers}
+                      onAnswer={(id, value) => setListeningAnswers((prev) => ({ ...prev, [id]: value }))}
+                      disabled={isProcessingStep}
+                      textClass={textClass}
+                    />
+                  </div>
+                </>
+              ) : (
+                <TestLoadingState error={testsError} />
+              )}
+            </div>
           </div>
         )}
 
-        {/* STEP 3: READING - CBT SPLIT VIEW */}
+        {/* READING */}
         {step === "reading" && (
-          <div className="flex-1 flex h-full overflow-hidden">
-            {/* Left Column: Passage with independent scroll */}
-            <div className="flex-1 overflow-y-auto px-8 py-8 bg-background border-r border-muted/50" style={{
-              scrollbarColor: "var(--scrollbar-thumb) var(--scrollbar-track)",
-              scrollbarWidth: "thin"
-            }}>
-              <div className="max-w-2xl mx-auto space-y-6">
-                {readingTest ? (
-                  readingTest.passages.map((passage) => (
-                    <div key={passage.id} className="space-y-4">
-                      <h1 className="text-xl font-bold flex items-center gap-2">
-                        <BookOpen className="h-5 w-5 text-primary" />
-                        {passage.title}
-                      </h1>
-                      <p className={`${getTextSizeClass()} text-foreground/90 leading-relaxed font-sans whitespace-pre-wrap select-text antialiased`}>
+          readingTest ? (
+            <SplitPane
+              leftLabel="Passage"
+              rightLabel="Questions"
+              left={
+                <article className="mx-auto max-w-[68ch] px-5 py-8 sm:px-10 lg:py-12">
+                  {readingTest.passages.map((passage, i) => (
+                    <div key={passage.id} className={i > 0 ? "mt-14" : undefined}>
+                      <p className="text-[14px] text-soft">Reading passage {passage.id}</p>
+                      <h1 className="mt-1 text-[26px] font-medium leading-tight text-ink">{stripPassagePrefix(passage.title)}</h1>
+                      <p className={`${passageSize[fontScale]} mt-6 whitespace-pre-wrap leading-[1.7] text-ink select-text`}>
                         {passage.text}
                       </p>
                     </div>
-                  ))
-                ) : (
-                  <TestLoadingState error={testsError} />
-                )}
-              </div>
-            </div>
-
-            {/* Right Column: Questions with independent scroll */}
-            <div className="w-[480px] md:w-[540px] overflow-y-auto bg-muted/30 px-8 py-8 flex flex-col justify-between shrink-0" style={{
-              scrollbarColor: "var(--scrollbar-thumb) var(--scrollbar-track)",
-              scrollbarWidth: "thin"
-            }}>
-              <div className="space-y-6">
-                <div>
-                  <h2 className="text-lg font-bold">Answer All Questions</h2>
-                  <p className="text-xs text-muted-foreground mt-0.5">Answer each question based on the passage text.</p>
-                </div>
-
-                <div className="space-y-4">
-                  {readingTest?.passages.flatMap((passage) => passage.questions).map((q) => (
-                    <QuestionField
-                      key={q.id}
-                      question={q}
-                      value={readingAnswers[q.id] || ""}
-                      onChange={(value) => setReadingAnswers((prev) => ({ ...prev, [q.id]: value }))}
-                      disabled={isProcessingStep}
-                      textSizeClass={getTextSizeClass()}
-                    />
                   ))}
+                </article>
+              }
+              right={
+                <div className="mx-auto max-w-[640px] px-5 py-8 sm:px-8 lg:py-12">
+                  <h2 className="text-[26px] font-medium leading-tight text-ink">
+                    Questions {readingQuestions[0]?.id}–{readingQuestions[readingQuestions.length - 1]?.id}
+                  </h2>
+                  <p className="mt-1 text-[15px] text-soft">Answer from the passage. Spelling counts on typed answers.</p>
+                  <div className="mt-8">
+                    <QuestionGroups
+                      questions={readingQuestions}
+                      answers={readingAnswers}
+                      onAnswer={(id, value) => setReadingAnswers((prev) => ({ ...prev, [id]: value }))}
+                      disabled={isProcessingStep}
+                      textClass={textClass}
+                    />
+                  </div>
                 </div>
-              </div>
-
-              <Button onClick={handleFinishReading} className="w-full h-11 mt-8" disabled={isProcessingStep || (!readingTest && !testsError)}>
-                {isProcessingStep ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit & Continue to Writing"}
-              </Button>
+              }
+            />
+          ) : (
+            <div className="mx-auto max-w-[760px] px-5 py-8 sm:px-8 lg:py-12">
+              <TestLoadingState error={testsError} />
             </div>
-          </div>
+          )
         )}
 
-        {/* STEP 4: WRITING - CBT SPLIT VIEW */}
+        {/* WRITING */}
         {step === "writing" && (
-          <div className="flex-1 flex h-full overflow-hidden">
-            {/* Left Column: essay prompt */}
-            <div className="flex-1 overflow-y-auto px-8 py-8 bg-background border-r border-muted/50" style={{
-              scrollbarColor: "var(--scrollbar-thumb) var(--scrollbar-track)",
-              scrollbarWidth: "thin"
-            }}>
-              <div className="max-w-2xl mx-auto space-y-6">
-                <div>
-                  <h1 className="text-xl font-bold flex items-center gap-2">
-                    <PenTool className="h-5 w-5 text-primary" />
-                    Writing Task 2 (Essay)
-                  </h1>
-                  <p className="text-xs text-muted-foreground mt-1">Write an essay in response to the topic below (minimum 250 words).</p>
-                </div>
-                <div className={`${getTextSizeClass()} rounded-xl border border-muted/80 bg-muted/10 p-5 font-bold leading-relaxed text-foreground select-text`}>
-                  &ldquo;{writingPrompt}&rdquo;
-                </div>
-              </div>
-            </div>
-
-            {/* Right Column: response editor */}
-            <div className="w-[480px] md:w-[540px] lg:w-[600px] overflow-y-auto bg-muted/30 px-8 py-8 flex flex-col justify-between shrink-0" style={{
-              scrollbarColor: "var(--scrollbar-thumb) var(--scrollbar-track)",
-              scrollbarWidth: "thin"
-            }}>
-              <div className="space-y-4 flex-1 flex flex-col">
-                <div className="flex justify-between items-center">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Your Response</label>
-                  <span className={`text-xs font-mono font-bold ${
-                    essay.trim().split(/\s+/).length < 250 ? "text-amber-500" : "text-emerald-500"
-                  }`}>
-                    Words: {essay.trim() === "" ? 0 : essay.trim().split(/\s+/).length} / 250
-                  </span>
+          <SplitPane
+            leftLabel="Task"
+            rightLabel="Your essay"
+            rightBadge={<span className="tabular text-[13px] text-soft">{words}</span>}
+            rightWidth="lg:w-[54%]"
+            left={
+              <article className="mx-auto max-w-[62ch] px-5 py-8 sm:px-10 lg:py-12">
+                <p className="text-[14px] text-soft">Writing Task 2</p>
+                <h1 className="mt-1 text-[26px] font-medium leading-tight text-ink">Write about the following topic.</h1>
+                <p className={`${passageSize[fontScale]} mt-6 leading-[1.7] text-ink select-text`}>{writingPrompt}</p>
+                <p className="mt-6 text-[15px] leading-normal text-soft">
+                  Give reasons for your answer and include any relevant examples from your own knowledge or experience.
+                  Write at least 250 words. You should spend about 40 minutes on this task.
+                </p>
+              </article>
+            }
+            right={
+              <div className="flex h-full flex-col px-5 py-6 sm:px-8 lg:py-10">
+                <div className="mb-3 flex items-baseline justify-between">
+                  <label htmlFor="mock-essay" className="text-[15px] font-semibold text-ink">
+                    Your essay
+                  </label>
+                  <p className="text-[14px] text-soft">
+                    <span key={words >= 250 ? "over" : "under"} className={cn("tabular t-swap", words >= 250 ? "text-good" : "text-ink")}>
+                      {words}
+                    </span>{" "}
+                    words · 250 minimum
+                  </p>
                 </div>
                 <Textarea
-                  placeholder="Type essay response here..."
+                  id="mock-essay"
+                  placeholder="Start writing here"
                   value={essay}
                   onChange={(e) => setEssay(e.target.value)}
-                  className={`${getTextSizeClass()} flex-1 min-h-[400px] font-sans leading-relaxed resize-none p-4 rounded-xl border border-muted/50 focus:ring-1 focus:ring-primary`}
+                  className={`${passageSize[fontScale]} min-h-[360px] flex-1 resize-none bg-sheet p-4 leading-[1.7]`}
                   disabled={isProcessingStep}
+                  spellCheck={false}
                 />
               </div>
-
-              <Button onClick={handleFinishWriting} className="w-full h-11 mt-6" disabled={isProcessingStep}>
-                {isProcessingStep ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit & Continue to Speaking"}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* STEP 5: SPEAKING - LIVEKIT AI EXAMINER */}
-        {step === "speaking" && token && examAttemptId && (
-          <SpeakingLiveKitRoom
-            backendUrl={BACKEND_URL}
-            authToken={token}
-            attemptId={examAttemptId}
-            candidateName={candidateName}
-            onPromptChange={setSpeakingPrompt}
-            onTranscriptChange={setTranscript}
-            onComplete={handleFinishSpeaking}
+            }
           />
         )}
 
-        {/* STEP 6: CONSOLIDATED REPORT */}
-        {step === "report" && (
-          <div className="w-full max-w-4xl p-6 md:p-12 overflow-y-auto">
-            <Card className="shadow-md border-muted/50 overflow-hidden">
-              <div className="bg-primary/5 border-b border-primary/10 py-6 text-center space-y-2">
-                <h2 className="text-2xl font-black text-foreground">Consolidated IELTS Report</h2>
-                <p className="text-xs text-muted-foreground">Overall band calculated according to official IELTS grading metrics.</p>
-              </div>
-              <CardContent className="p-8 space-y-8">
-                {/* circular badge */}
-                <div className="flex flex-col items-center justify-center space-y-2">
-                  <div className="relative flex h-28 w-28 items-center justify-center rounded-full border-4 border-primary/10 bg-primary/5 shadow-xs">
-                    <div className="text-center">
-                      <span className="text-4xl font-black text-primary font-mono block leading-none">
-                        {overallScore !== null ? overallScore.toFixed(1) : "—"}
-                      </span>
-                      <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mt-1 block">
-                        Band
-                      </span>
-                    </div>
-                  </div>
-                  <h3 className="font-extrabold text-lg text-foreground">Estimated IELTS Score</h3>
-                  <p className="text-xs text-muted-foreground text-center max-w-sm">
-                    {overallScore === null
-                      ? "No module could be graded in this attempt, so no band score is reported."
-                      : gradedModules.length < moduleScores.length
-                        ? "Calculated from graded modules only. Modules marked Not graded could not be assessed."
-                        : "This represents your mock level. Focus on your weaker subsections in writing/speaking to push this average to 8.0+."}
-                  </p>
-                </div>
-
-                {/* subscores */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  {moduleScores.map((item, idx) => (
-                    <div key={idx} className="p-4 rounded-xl border border-muted/50 bg-background text-center space-y-1.5 shadow-xs">
-                      <div className="text-xs font-bold text-muted-foreground">{item.module}</div>
-                      <div className="text-xl font-black font-mono text-primary">
-                        {item.score !== null ? `Band ${item.score.toFixed(1)}` : "Not graded"}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="flex flex-col sm:flex-row gap-3 w-full">
-                  <Button 
-                    onClick={handleDownloadTRF} 
-                    variant="outline" 
-                    className="flex-1 h-11 border-primary/30 text-primary hover:bg-primary/5 cursor-pointer font-semibold"
-                  >
-                    Download Test Report Card (TRF)
-                  </Button>
-                  <a href="/dashboard" className="flex-1">
-                    <Button className="w-full h-11 cursor-pointer font-semibold">
-                      Return to Dashboard
-                    </Button>
-                  </a>
-                </div>
-              </CardContent>
-            </Card>
+        {/* SPEAKING - LIVEKIT AI EXAMINER */}
+        {step === "speaking" && token && examAttemptId && (
+          <div className="h-full overflow-y-auto">
+            <SpeakingLiveKitRoom
+              backendUrl={BACKEND_URL}
+              authToken={token}
+              attemptId={examAttemptId}
+              candidateName={candidateName}
+              onPromptChange={setSpeakingPrompt}
+              onTranscriptChange={setTranscript}
+            />
           </div>
         )}
-
       </div>
-    </div>
+    </ExamFrame>
   );
 }

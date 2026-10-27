@@ -1,33 +1,23 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import Link from "next/link";
+import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Calendar, Target, Award, Clock, ArrowLeft, RefreshCw, Sparkles, BookOpen } from "lucide-react";
+import { AppShell, PageColumn, Panel } from "@/components/app/app-shell";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
+import { TaskCheck } from "@/components/planner/task-check";
+import {
+  currentWeekIndex,
+  mockWhen,
+  planProgress,
+  taskKey,
+  type StudyPlanData,
+} from "@/components/planner/plan-utils";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
-interface WeeklyPlan {
-  week: number;
-  focus: string;
-  tasks: string[];
-}
-
-interface MockTask {
-  date: string;
-  test_type: string;
-  objective: string;
-}
-
-interface StudyPlanData {
-  weekly_plans: WeeklyPlan[];
-  mock_schedule: MockTask[];
-  mentor_advice: string;
-  completed_tasks?: string[];
-}
 
 export default function PlannerPage() {
   const router = useRouter();
@@ -37,6 +27,8 @@ export default function PlannerPage() {
   // Planner states
   const [plan, setPlan] = useState<StudyPlanData | null>(null);
   const [isFetchingPlan, setIsFetchingPlan] = useState(true);
+  const [fetchFailed, setFetchFailed] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [isGenerating, setIsGenerating] = useState(false);
 
   // Sync session client-side
@@ -45,7 +37,7 @@ export default function PlannerPage() {
       try {
         const { data: { session }, error } = await supabase.auth.getSession();
         if (error || !session) {
-          toast.error("Please login to view your Study Planner.");
+          toast.error("Sign in to see your study plan.");
           router.push("/auth/login?redirect=/planner");
         } else {
           setToken(session.access_token);
@@ -64,6 +56,7 @@ export default function PlannerPage() {
     if (!token) return;
 
     const fetchActivePlan = async () => {
+      setFetchFailed(false);
       try {
         const res = await fetch(`${BACKEND_URL}/api/planner/active`, {
           headers: {
@@ -81,25 +74,26 @@ export default function PlannerPage() {
         }
       } catch (err) {
         console.error(err);
+        setFetchFailed(true);
       } finally {
         setIsFetchingPlan(false);
       }
     };
 
     fetchActivePlan();
-  }, [token]);
+  }, [token, reloadKey]);
 
   // Toggle task completion checkmark
   const toggleTask = async (weekNum: number, taskIdx: number) => {
     if (!plan || !token) return;
 
-    const taskKey = `${weekNum}-${taskIdx}`;
+    const key = taskKey(weekNum, taskIdx);
     const currentCompleted = plan.completed_tasks || [];
-    const isCompleted = currentCompleted.includes(taskKey);
+    const isCompleted = currentCompleted.includes(key);
 
     const updatedCompleted = isCompleted
-      ? currentCompleted.filter((k) => k !== taskKey)
-      : [...currentCompleted, taskKey];
+      ? currentCompleted.filter((k) => k !== key)
+      : [...currentCompleted, key];
 
     const updatedPlan = {
       ...plan,
@@ -121,7 +115,7 @@ export default function PlannerPage() {
       if (!res.ok) throw new Error();
     } catch (err) {
       console.error(err);
-      toast.error("Failed to sync progress with the server.");
+      toast.error("That tick didn't save. Try again.");
       setPlan(plan); // Rollback state
     }
   };
@@ -129,6 +123,10 @@ export default function PlannerPage() {
   // Generate planner mutation
   const handleGenerate = async () => {
     if (!token) return;
+    if (plan && planProgress(plan).completed > 0) {
+      const ok = window.confirm("Rebuilding replaces this plan and clears the tasks you have ticked. Rebuild it?");
+      if (!ok) return;
+    }
     setIsGenerating(true);
     try {
       const res = await fetch(`${BACKEND_URL}/api/planner/generate`, {
@@ -141,230 +139,244 @@ export default function PlannerPage() {
 
       if (!res.ok) {
         const err = await res.json().catch(() => null);
-        throw new Error(typeof err?.error === "string" ? err.error : "Failed to generate roadmap.");
+        throw new Error(typeof err?.error === "string" ? err.error : "The plan didn't build. Try again.");
       }
 
       const generated = await res.json();
       setPlan(generated);
-      toast.success("Study roadmap generated successfully!");
-    } catch (err: any) {
-      toast.error(err.message || "Failed to contact planner engine.");
+      setFetchFailed(false);
+      toast.success("Your study plan is ready.");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Couldn't reach the planner. Try again.");
     } finally {
       setIsGenerating(false);
     }
   };
 
-  if (isAuthLoading || isFetchingPlan) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <div className="text-center space-y-4">
-          <Loader2 className="h-10 w-10 animate-spin text-primary mx-auto" />
-          <p className="text-sm text-muted-foreground">Loading study planner...</p>
-        </div>
-      </div>
-    );
-  }
+  return (
+    <AppShell title="Study plan">
+      {isAuthLoading || isFetchingPlan ? (
+        <LoadingState />
+      ) : isGenerating ? (
+        <GeneratingState />
+      ) : fetchFailed && !plan ? (
+        <PageColumn
+          title="Your plan didn't load."
+          lead="The planner didn't answer. Your ticks are safe; try again in a moment."
+          actions={
+            <Button variant="secondary" onClick={() => setReloadKey((k) => k + 1)}>
+              Try again
+            </Button>
+          }
+        >
+          {null}
+        </PageColumn>
+      ) : !plan || !plan.weekly_plans?.length ? (
+        <PageColumn
+          title="No study plan yet."
+          lead="Build a week-by-week plan from your target band, your exam date and the scores you have so far. It takes about half a minute."
+          actions={
+            <Button variant="accent" onClick={handleGenerate}>
+              Build my plan
+            </Button>
+          }
+        >
+          <p className="max-w-[60ch] text-[15px] text-soft">
+            Each week gets a focus and three or four tasks you can tick off, with mock tests placed before your exam.
+            You can rebuild it whenever your scores move.
+          </p>
+        </PageColumn>
+      ) : (
+        <PlanView plan={plan} onToggle={toggleTask} onRebuild={handleGenerate} />
+      )}
+    </AppShell>
+  );
+}
+
+function PlanView({
+  plan,
+  onToggle,
+  onRebuild,
+}: {
+  plan: StudyPlanData;
+  onToggle: (week: number, taskIdx: number) => void;
+  onRebuild: () => void;
+}) {
+  const { total, completed, percent } = planProgress(plan);
+  const currentIdx = currentWeekIndex(plan);
+  const current = plan.weekly_plans[currentIdx];
+  const done = new Set(plan.completed_tasks ?? []);
+  const allDone = total > 0 && completed === total;
 
   return (
-    <div className="min-h-screen bg-muted/20">
-      {/* Top Header */}
-      <header className="sticky top-0 z-10 border-b border-muted/50 bg-background/80 backdrop-blur-md px-6 h-16 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
-          <a href="/dashboard">
-            <Button variant="ghost" size="icon" className="h-8 w-8 mr-1">
-              <ArrowLeft className="h-4 w-4" />
+    <PageColumn
+      title={`${completed} of ${total} tasks done.`}
+      lead={
+        allDone ? (
+          "Every week is ticked off. Rebuild the plan to get the next set."
+        ) : (
+          <>
+            Week {current.week} of {plan.weekly_plans.length}: {current.focus}.
+          </>
+        )
+      }
+      actions={
+        <Button variant="secondary" onClick={onRebuild}>
+          Rebuild plan
+        </Button>
+      }
+    >
+      <div className="grid grid-cols-1 gap-x-4 gap-y-8 lg:grid-cols-12">
+        {/* The weeks, as one vertical plan */}
+        <ol className="flex flex-col lg:col-span-8" aria-label="Weekly plan">
+          {plan.weekly_plans.map((w, wi) => {
+            const isCurrent = wi === currentIdx && !allDone;
+            const weekDone = w.tasks.filter((_, i) => done.has(taskKey(w.week, i))).length;
+            const complete = weekDone === w.tasks.length && w.tasks.length > 0;
+            return (
+              <li
+                key={w.week}
+                className={cn(
+                  "grid gap-x-6 gap-y-2 sm:grid-cols-[96px_1fr]",
+                  isCurrent ? "my-2 rounded-2xl bg-panel p-5 first:mt-0" : "border-t border-border px-5 py-5 first:border-t-0",
+                  wi === currentIdx + 1 && "border-t-0"
+                )}
+              >
+                <div className="flex items-baseline gap-3 sm:flex-col sm:gap-1">
+                  <span className="text-[15px] font-medium text-ink">Week {w.week}</span>
+                  <span className={cn("text-sm", complete ? "text-good" : "text-soft")}>
+                    {isCurrent ? "This week" : complete ? "Done" : wi < currentIdx ? "Unfinished" : "Coming up"}
+                  </span>
+                </div>
+                <div>
+                  <div className="flex items-baseline justify-between gap-4">
+                    <h2 className="text-[17px] font-medium text-ink">{w.focus}</h2>
+                    <span className="tabular shrink-0 text-sm text-soft">
+                      {weekDone} of {w.tasks.length}
+                    </span>
+                  </div>
+                  <ul className="mt-2 flex flex-col">
+                    {w.tasks.map((task, i) => (
+                      <li key={i}>
+                        <TaskCheck
+                          checked={done.has(taskKey(w.week, i))}
+                          label={task}
+                          onToggle={() => onToggle(w.week, i)}
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+
+        {/* Progress, mocks and the mentor's note */}
+        <aside className="flex flex-col gap-4 lg:col-span-4">
+          <Panel title="Progress">
+            <p className="tabular text-[30px] leading-none text-ink">
+              <span key={percent} className="t-pop">
+                {percent}%
+              </span>
+            </p>
+            <div
+              className="mt-4 h-2 w-full overflow-hidden rounded-full bg-panel-strong"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={total}
+              aria-valuenow={completed}
+              aria-label="Tasks done"
+            >
+              <div
+                className="t-progress-fill h-full w-full rounded-full bg-teal"
+                style={{ transform: `scaleX(${total ? completed / total : 0})` }}
+              />
+            </div>
+            <div className="tabular mt-2 flex justify-between text-sm text-soft">
+              <span>{completed} done</span>
+              <span>{total} tasks</span>
+            </div>
+          </Panel>
+
+          <Panel title="Mock tests" aside={plan.mock_schedule?.length ? `${plan.mock_schedule.length} planned` : undefined}>
+            {plan.mock_schedule?.length ? (
+              <ul className="flex flex-col">
+                {plan.mock_schedule.map((m, i) => (
+                  <li key={i} className="grid grid-cols-[72px_1fr] gap-3 border-t border-border py-3 first:border-t-0 first:pt-0 last:pb-0">
+                    <span className="text-[15px] font-medium text-ink">{mockWhen(m.date)}</span>
+                    <span>
+                      <span className="block text-[15px] text-ink">{m.test_type}</span>
+                      <span className="block text-sm text-soft">{m.objective}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-[15px] text-soft">No mocks on this plan.</p>
+            )}
+            <Button asChild variant="secondary" size="sm" className="mt-4">
+              <Link href="/simulator">Open the full mock</Link>
             </Button>
-          </a>
-          <span className="font-bold text-foreground">Study Roadmap Planner</span>
+          </Panel>
+
+          {plan.mentor_advice && (
+            <Panel title="From your mentor">
+              <p className="text-[15px] leading-relaxed text-ink">{plan.mentor_advice}</p>
+              <Link
+                href="/chat"
+                className="mt-3 inline-block text-sm text-ink underline decoration-1 underline-offset-4 hover:decoration-2"
+              >
+                Ask a follow-up
+              </Link>
+            </Panel>
+          )}
+        </aside>
+      </div>
+    </PageColumn>
+  );
+}
+
+function WeekSkeletons() {
+  return (
+    <div className="flex flex-col gap-6 lg:w-2/3">
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="grid gap-6 border-t border-border pt-5 first:border-t-0 sm:grid-cols-[96px_1fr]">
+          <div className="t-skel h-5 w-16" />
+          <div className="flex flex-col gap-3">
+            <div className="t-skel h-5 w-2/3" />
+            <div className="t-skel h-4 w-full" />
+            <div className="t-skel h-4 w-5/6" />
+            <div className="t-skel h-4 w-3/4" />
+          </div>
         </div>
-        <a href="/dashboard" className="text-xs font-bold text-primary hover:underline">
-          Go to Dashboard
-        </a>
-      </header>
-
-      {/* Main Container */}
-      <main className="mx-auto max-w-4xl px-4 py-8 space-y-6">
-        
-        {/* Loading / Generate Prompt */}
-        {isGenerating && (
-          <Card className="shadow-md border-muted/50 p-8 min-h-[400px] flex items-center justify-center">
-            <CardContent className="text-center space-y-4">
-              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/5 text-primary border border-primary/10 shadow-xs">
-                <RefreshCw className="h-8 w-8 animate-spin" />
-              </div>
-              <div className="space-y-2">
-                <h3 className="font-extrabold text-lg">Assembling Study Planner</h3>
-                <p className="text-sm text-muted-foreground max-w-xs mx-auto">
-                  Our curriculum AI is analyzing your current band goals and weak segments to map daily tasks and milestone timelines.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {!isGenerating && !plan && (
-          <Card className="shadow-md border-muted/50 p-8 min-h-[400px] flex flex-col items-center justify-center text-center space-y-6 bg-gradient-to-br from-primary/5 via-transparent to-transparent">
-            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-gradient-to-tr from-primary to-primary/80 text-primary-foreground shadow-lg shadow-primary/20 animate-pulse">
-              <Sparkles className="h-8 w-8" />
-            </div>
-            <div className="space-y-2">
-              <h2 className="text-2xl font-black text-foreground tracking-tight">Generate Your Study Plan</h2>
-              <p className="text-sm text-muted-foreground max-w-sm mx-auto">
-                No active plan found. Let our IELTS curriculum engine map out weekly focuses, tasks, and simulator drills customized for your score goals.
-              </p>
-            </div>
-            <Button onClick={handleGenerate} size="lg" className="h-11">
-              Generate Free Roadmap
-            </Button>
-          </Card>
-        )}
-
-        {/* Plan display UI */}
-        {!isGenerating && plan && (() => {
-          const totalTasks = plan.weekly_plans?.reduce((acc, curr) => acc + (curr.tasks?.length || 0), 0) || 0;
-          const completedTasks = plan.completed_tasks?.length || 0;
-          const progressPercent = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
-
-          return (
-            <div className="space-y-6 animate-message-appear animate-in">
-              {/* Advice banner */}
-              <Card className="shadow-sm border-primary/20 bg-primary/5">
-                <CardContent className="p-5 flex gap-4 items-start">
-                  <div className="rounded-xl bg-primary/10 p-2.5 text-primary shrink-0">
-                    <Sparkles className="h-5 w-5" />
-                  </div>
-                  <div className="space-y-1">
-                    <h3 className="font-bold text-sm text-primary">AI Mentor Strategy Note</h3>
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                      {plan.mentor_advice}
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Learning Progression Card */}
-              <Card className="shadow-xs border-stone-200 bg-white">
-                <CardContent className="p-5 space-y-3">
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <h3 className="font-bold text-sm text-slate-800">Your Learning Progression</h3>
-                      <p className="text-[11px] text-muted-foreground font-medium">Keep completing weekly tasks to reach your band goal.</p>
-                    </div>
-                    <span className="text-sm font-extrabold text-primary font-mono">{progressPercent}% Done</span>
-                  </div>
-                  <div className="h-2 w-full bg-stone-100 rounded-full overflow-hidden border border-stone-200/40">
-                    <div 
-                      className="h-full bg-gradient-to-r from-primary to-primary/80 rounded-full transition-all duration-500 ease-out" 
-                      style={{ width: `${progressPercent}%` }}
-                    />
-                  </div>
-                  <div className="flex justify-between text-[10px] text-slate-400 font-bold">
-                    <span>{completedTasks} / {totalTasks} Tasks Completed</span>
-                    <span>Target Weekly Milestone</span>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Weekly Focus blocks */}
-              <div className="space-y-4">
-                <h2 className="text-base font-bold text-foreground">Weekly Milestones</h2>
-                <div className="grid grid-cols-1 gap-4">
-                  {plan?.weekly_plans?.map((w) => (
-                    <Card key={w.week} className="shadow-xs border-muted/50">
-                      <CardHeader className="pb-2 bg-muted/10">
-                        <div className="flex items-center gap-2">
-                          <span className="font-black text-xs text-primary bg-primary/10 px-2 py-0.5 rounded-md">
-                            Week {w.week}
-                          </span>
-                          <CardTitle className="text-sm font-bold text-foreground">
-                            {w.focus}
-                          </CardTitle>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="pt-4">
-                        <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          {w?.tasks?.map((task, idx) => {
-                            const taskKey = `${w.week}-${idx}`;
-                            const isDone = plan.completed_tasks?.includes(taskKey) || false;
-
-                            return (
-                              <li 
-                                key={idx} 
-                                onClick={() => toggleTask(w.week, idx)}
-                                className={`flex items-start gap-3 text-xs leading-relaxed border p-3 rounded-xl cursor-pointer transition-all ${
-                                  isDone 
-                                    ? "bg-stone-50/50 border-stone-200 text-stone-400 line-through opacity-70" 
-                                    : "bg-background border-muted/60 hover:border-primary/30 text-muted-foreground hover:text-slate-800"
-                                }`}
-                              >
-                                <input 
-                                  type="checkbox" 
-                                  checked={isDone}
-                                  onChange={() => {}} // Controlled by list item click
-                                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary shrink-0 mt-0.5 cursor-pointer accent-primary" 
-                                />
-                                <span>{task}</span>
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              </div>
-
-            {/* Mock Schedule Table */}
-            <Card className="shadow-xs border-muted/50">
-              <CardHeader>
-                <CardTitle className="text-sm font-bold">Recommended Assessment Schedule</CardTitle>
-                <CardDescription>Target testing schedules leading up to your real exam.</CardDescription>
-              </CardHeader>
-              <CardContent className="p-0">
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-muted/50 text-xs">
-                    <thead className="bg-muted/30">
-                      <tr>
-                        <th className="px-4 py-3 text-left font-bold text-muted-foreground">Timeline</th>
-                        <th className="px-4 py-3 text-left font-bold text-muted-foreground">Activity Type</th>
-                        <th className="px-4 py-3 text-left font-bold text-muted-foreground">Key Objective</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-muted/30">
-                      {plan?.mock_schedule?.map((item, idx) => (
-                        <tr key={idx} className="hover:bg-muted/10">
-                          <td className="px-4 py-3 font-semibold text-primary">{item.date}</td>
-                          <td className="px-4 py-3 text-foreground font-semibold">{item.test_type}</td>
-                          <td className="px-4 py-3 text-muted-foreground">{item.objective}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
-
-              {/* Actions */}
-              <div className="flex justify-between items-center">
-                <Button 
-                  onClick={handleGenerate} 
-                  variant="outline" 
-                  size="sm" 
-                  className="gap-1.5 text-primary border-primary/20 hover:bg-primary/5 cursor-pointer font-semibold"
-                >
-                  <RefreshCw className="h-3.5 w-3.5" />
-                  Sync & Adapt Roadmap
-                </Button>
-                <a href="/dashboard">
-                  <Button size="sm">
-                    Go to Dashboard
-                  </Button>
-                </a>
-              </div>
-            </div>
-          );
-        })()}
-      </main>
+      ))}
     </div>
+  );
+}
+
+function LoadingState() {
+  return (
+    <PageColumn
+      title={<span className="t-skel inline-block h-[0.8em] w-[min(420px,80vw)] align-middle" aria-label="Loading your plan" />}
+      lead={<span className="t-skel inline-block h-4 w-72 align-middle" />}
+    >
+      <WeekSkeletons />
+    </PageColumn>
+  );
+}
+
+function GeneratingState() {
+  return (
+    <PageColumn
+      title="Building your plan"
+      lead={
+        <span role="status" aria-live="polite" className="t-shimmer">
+          Reading your target band, exam date and recent scores
+        </span>
+      }
+    >
+      <WeekSkeletons />
+    </PageColumn>
   );
 }

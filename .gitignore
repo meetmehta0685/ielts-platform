@@ -53,3 +53,6 @@ yarn-error.log*
 *.njsproj
 *.sln
 *.sw?
+
+# design tooling output
+.taste-skill/

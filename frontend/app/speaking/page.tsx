@@ -1,16 +1,21 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import type { CSSProperties } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { toast } from "sonner";
 import { readSseEvents } from "@/lib/sse";
-import { Loader2, Mic, Square, Volume2, ArrowLeft, CheckCircle, RefreshCw, Clock } from "lucide-react";
+import Link from "next/link";
+import { Mic, Square, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import { AppShell, PageColumn, Panel } from "@/components/app/app-shell";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { ThinkingStatus, stageFromStream } from "@/components/writing/thinking-status";
+import { CriteriaTable, NextSteps, OverallBand } from "@/components/writing/band-report";
+import { CueCard } from "@/components/speaking/cue-card";
+import { cn } from "@/lib/utils";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -19,6 +24,11 @@ interface SpeakingPartPrompt {
   title: string;
   question: string;
   description: string;
+  /** Page heading and plain lead line for this part. */
+  heading: string;
+  lead: string;
+  /** Part 2 only: the cue card laid out as printed. `question` stays the exact text sent to the marker. */
+  cue?: { topic: string; bullets: string[]; closing: string };
 }
 
 const SPEAKING_PARTS: SpeakingPartPrompt[] = [
@@ -26,21 +36,44 @@ const SPEAKING_PARTS: SpeakingPartPrompt[] = [
     part: 1,
     title: "Part 1: Interview & Warmup",
     question: "Let's talk about your hometown. Describe the town or city where you grew up. Is it a good place for young people to live, and why?",
-    description: "You will answer basic personal questions about yourself, your family, or your home."
+    description: "You will answer basic personal questions about yourself, your family, or your home.",
+    heading: "Part 1, the interview.",
+    lead: "Short, natural answers about you and your life. Speak for up to a minute.",
   },
   {
     part: 2,
     title: "Part 2: Individual Long Turn (Cue Card)",
     question: "Describe a piece of technology you own that is very important to you. You should say: what it is, when you got it, how you use it, and explain why it is so important to you.",
-    description: "You have 1 minute to prepare notes. Then, you should speak for 1 to 2 minutes on this topic."
+    description: "You have 1 minute to prepare notes. Then, you should speak for 1 to 2 minutes on this topic.",
+    heading: "Part 2, the long turn.",
+    lead: "One minute to prepare, then speak for up to two minutes on the cue card.",
+    cue: {
+      topic: "Describe a piece of technology you own that is very important to you.",
+      bullets: ["what it is", "when you got it", "how you use it"],
+      closing: "and explain why it is so important to you.",
+    },
   },
   {
     part: 3,
     title: "Part 3: Two-Way Discussion",
     question: "In your opinion, how has modern technology changed the way families spend time together compared to the past? Do you believe these changes are positive or negative?",
-    description: "You will answer more abstract, analytical questions developing the topic in Part 2."
+    description: "You will answer more abstract, analytical questions developing the topic in Part 2.",
+    heading: "Part 3, the discussion.",
+    lead: "Bigger questions on the Part 2 topic. Give reasons and examples; up to a minute.",
   }
 ];
+
+/** Marker stages, keyed by the JSON field the model is writing when it reaches each one. */
+const MARKING_STAGES: [string, string][] = [
+  ["band_score", "Settling the overall band"],
+  ["fluency_coherence", "Scoring fluency and coherence"],
+  ["lexical_resource", "Weighing your vocabulary"],
+  ["grammatical_range", "Checking grammatical range and accuracy"],
+  ["pronunciation", "Estimating pronunciation"],
+  ["examiner_comments", "Writing the examiner's comments"],
+  ["improvements", "Choosing what to change"],
+];
+const MARKING_WARMUP = ["Reading your transcript", "Comparing against the band descriptors"];
 
 interface SpeakingResult {
   id?: string;
@@ -61,10 +94,6 @@ function SpeakingPageContent() {
 
   // Candidate Details
   const [candidateName, setCandidateName] = useState("Candidate");
-  const [candidateId, setCandidateId] = useState("ielts-candidate");
-
-  // CBT Configuration States
-  const [fontScale, setFontScale] = useState<"sm" | "base" | "lg">("base");
 
   // Flow states
   const [currentPartIdx, setCurrentPartIdx] = useState(0);
@@ -96,6 +125,7 @@ function SpeakingPageContent() {
   const [isGrading, setIsGrading] = useState(false);
   const [streamingText, setStreamingText] = useState("");
   const [result, setResult] = useState<SpeakingResult | null>(null);
+  const [speakError, setSpeakError] = useState<string | null>(null);
 
   // Sync session client-side
   useEffect(() => {
@@ -108,8 +138,11 @@ function SpeakingPageContent() {
         } else {
           setToken(session.access_token);
           if (session.user) {
-            setCandidateName(session.user.email?.split("@")[0] || "Candidate");
-            setCandidateId(`ielts-${session.user.id.substring(0, 8)}`);
+            setCandidateName(
+              (session.user.user_metadata?.full_name as string | undefined) ||
+                session.user.email?.split("@")[0] ||
+                "Candidate"
+            );
           }
         }
       } catch (err) {
@@ -385,6 +418,7 @@ function SpeakingPageContent() {
   const handleTranscribe = async (blob: Blob) => {
     if (!token) return;
     setIsTranscribing(true);
+    setSpeakError(null);
 
     try {
       const formData = new FormData();
@@ -412,7 +446,9 @@ function SpeakingPageContent() {
       setTranscript(data.transcript || "");
       toast.success("Speech transcribed successfully!");
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Failed to transcribe audio.");
+      const message = err instanceof Error ? err.message : "Failed to transcribe audio.";
+      setSpeakError(message);
+      toast.error(message);
     } finally {
       setIsTranscribing(false);
     }
@@ -429,6 +465,7 @@ function SpeakingPageContent() {
     setIsGrading(true);
     setResult(null);
     setStreamingText("");
+    setSpeakError(null);
 
     try {
       const response = await fetch(`${BACKEND_URL}/api/speaking/evaluate`, {
@@ -478,7 +515,9 @@ function SpeakingPageContent() {
         throw new Error("Failed to receive completed speaking evaluation from server.");
       }
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Failed to grade speaking attempt.");
+      const message = err instanceof Error ? err.message : "Failed to grade speaking attempt.";
+      setSpeakError(message);
+      toast.error(message);
     } finally {
       setIsGrading(false);
       setStreamingText("");
@@ -491,6 +530,7 @@ function SpeakingPageContent() {
       setTranscript("");
       setResult(null);
       setNotepadText("");
+      setSpeakError(null);
     }
   };
 
@@ -509,490 +549,352 @@ function SpeakingPageContent() {
     return `${mins}:${secs < 10 ? "0" : ""}${secs}`;
   };
 
-  const getTextSizeClass = () => {
-    if (fontScale === "sm") return "text-xs";
-    if (fontScale === "lg") return "text-base";
-    return "text-sm";
+  // Choosing a part directly clears the current attempt, the same way advancing does.
+  const handleSelectPart = (idx: number) => {
+    setCurrentPartIdx(idx);
+    setTranscript("");
+    setResult(null);
+    setNotepadText("");
+    setSpeakError(null);
   };
 
-  if (isAuthLoading) {
+  if (isAuthLoading) return <SpeakingSkeleton />;
+
+  const partOptions = SPEAKING_PARTS.map((p, idx) => ({ value: String(idx), label: `Part ${p.part}` }));
+  const limitSeconds = currentPart.part === 2 ? 120 : 60;
+  const transcriptWords = transcript.trim() ? transcript.trim().split(/\s+/).length : 0;
+  const busy = isRecording || isPrepping || isTranscribing || isGrading;
+
+  /* ---------- Result: the band, the four criteria, then the examiner's comments ---------- */
+  if (result) {
+    const isLast = currentPartIdx >= SPEAKING_PARTS.length - 1;
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <div className="text-center space-y-4">
-          <Loader2 className="h-10 w-10 animate-spin text-primary mx-auto" />
-          <p className="text-sm text-muted-foreground">Verifying access...</p>
-        </div>
-      </div>
+      <AppShell title="Speaking">
+        <PageColumn
+          title={`Part ${currentPart.part}, marked.`}
+          lead={
+            isLast
+              ? `${transcriptWords} words in your answer. That was the last part of the speaking test.`
+              : `${transcriptWords} words in your answer, ${result.improvements.length} ${result.improvements.length === 1 ? "thing" : "things"} to change before Part ${currentPart.part + 1}.`
+          }
+          actions={
+            <>
+              <Button onClick={() => setResult(null)} variant="secondary">
+                Try this part again
+              </Button>
+              {isLast ? (
+                <Button asChild variant="accent">
+                  <Link href="/dashboard">Back to home</Link>
+                </Button>
+              ) : (
+                <Button onClick={handleNextPart} variant="accent">
+                  Go on to Part {currentPart.part + 1}
+                </Button>
+              )}
+            </>
+          }
+        >
+          <div className="flex flex-col gap-4 lg:grid lg:grid-cols-12 lg:items-start">
+            <div className="contents lg:col-span-3 lg:flex lg:flex-col lg:gap-4">
+              <div className="order-1 lg:order-none">
+                <OverallBand band={result.band_score} caption={`Speaking Part ${currentPart.part}. Pronunciation is estimated from your transcript.`} />
+              </div>
+              <div className="order-3 lg:order-none">
+                <Panel title="What to change">
+                  <NextSteps items={result.improvements} empty="The examiner gave no specific changes for this answer." />
+                </Panel>
+              </div>
+            </div>
+            <div className="contents lg:col-span-9 lg:flex lg:flex-col lg:gap-4">
+              <div className="order-2 lg:order-none">
+                <CriteriaTable
+                  aside="Out of 9"
+                  rows={[
+                    { label: "Fluency and coherence", band: result.fluency_coherence },
+                    { label: "Lexical resource", band: result.lexical_resource },
+                    { label: "Grammatical range and accuracy", band: result.grammatical_range },
+                    { label: "Pronunciation", band: result.pronunciation },
+                  ]}
+                />
+              </div>
+              <div className="order-4 lg:order-none">
+                <Panel title="Examiner comments">
+                  {result.examiner_comments ? (
+                    <p className="max-w-[70ch] whitespace-pre-wrap text-[17px] leading-[1.7] text-ink">{result.examiner_comments}</p>
+                  ) : (
+                    <p className="text-[15px] text-soft">The examiner left no comments on this answer.</p>
+                  )}
+                </Panel>
+              </div>
+              <section className="order-5 rounded-2xl border border-border bg-sheet p-5 sm:p-8 lg:order-none">
+                <h2 className="text-[15px] font-semibold text-ink">What you said</h2>
+                <p className="mt-1 mb-5 text-sm text-soft">{currentPart.cue ? currentPart.cue.topic : currentPart.question}</p>
+                {transcript ? (
+                  <p className="max-w-[70ch] whitespace-pre-wrap text-[17px] leading-[1.75] text-ink select-text">{transcript}</p>
+                ) : (
+                  <p className="text-[15px] text-soft">—</p>
+                )}
+              </section>
+            </div>
+          </div>
+        </PageColumn>
+      </AppShell>
     );
   }
 
+  /* ---------- Practice: the question on the left, the recorder on the right ---------- */
+  const phase = isGrading
+    ? "marking"
+    : isTranscribing
+      ? "transcribing"
+      : isRecording
+        ? "recording"
+        : isPrepping
+          ? "preparing"
+          : transcript
+            ? "recorded"
+            : "idle";
+
+  const phaseLabel = {
+    idle: "Ready when you are",
+    preparing: "Preparation",
+    recording: "Recording",
+    transcribing: "Transcribing",
+    recorded: "Recorded",
+    marking: "Marking",
+  }[phase];
+
+  const bigFigure =
+    phase === "preparing"
+      ? getTimerString(prepSeconds)
+      : phase === "idle"
+        ? getTimerString(currentPart.part === 2 ? 60 : 0)
+        : getTimerString(recordingSeconds);
+
+  const bigCaption = {
+    idle: currentPart.part === 2 ? "to prepare, then up to 2:00 to speak" : `Up to ${getTimerString(limitSeconds)}. Recording stops on its own.`,
+    preparing: "left to prepare. Recording starts by itself.",
+    recording: `of ${getTimerString(limitSeconds)}`,
+    transcribing: "recorded",
+    recorded: `recorded, ${transcriptWords} words transcribed`,
+    marking: `recorded, ${transcriptWords} words`,
+  }[phase];
+
+  const marking = stageFromStream(streamingText, MARKING_STAGES, MARKING_WARMUP);
+
   return (
-    <div className="min-h-screen bg-muted/20 flex flex-col justify-between" style={{
-      "--scrollbar-thumb": "rgba(100, 116, 139, 0.4)",
-      "--scrollbar-track": "rgba(241, 245, 249, 0.5)"
-    } as CSSProperties}>
-      {/* Dynamic Keyframe style tag */}
-      <style>{`
-        @keyframes speaking-bar-pulse {
-          0%, 100% { height: 4px; }
-          50% { height: 28px; }
+    <AppShell title="Speaking">
+      <PageColumn
+        title={currentPart.heading}
+        lead={currentPart.lead}
+        actions={
+          <SegmentedControl
+            label="Speaking part"
+            value={String(currentPartIdx)}
+            disabled={busy}
+            onChange={(v) => handleSelectPart(Number(v))}
+            options={partOptions}
+          />
         }
-        .speaking-bar {
-          animation: speaking-bar-pulse 1s ease-in-out infinite;
-        }
-      `}</style>
-
-      {/* Top Header */}
-      <header className="sticky top-0 z-10 border-b border-muted/50 bg-[#333f48] text-white px-6 h-16 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
-          <a href="/dashboard">
-            <Button variant="ghost" size="icon" className="h-8 w-8 mr-1 text-white hover:bg-white/10">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </a>
-          <span className="font-bold tracking-tight text-white">IELTS Speaking Practice</span>
-        </div>
-
-        {/* Center Indicator */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs uppercase bg-primary px-2.5 py-1 rounded font-extrabold tracking-wider">
-            Recorded Practice
-          </span>
-          <span className="text-xs text-white/70 font-bold border-l border-white/20 pl-2">
-            Part {currentPart.part} of 3
-          </span>
-        </div>
-
-        <div className="flex items-center gap-4">
-          {/* Font Resizing Controls */}
-          <div className="flex items-center gap-1 bg-[#222a30] rounded-md p-1 border border-white/10">
-            <Button 
-              size="icon" 
-              variant="ghost" 
-              onClick={() => setFontScale("sm")}
-              className={`h-7 w-7 text-xs ${fontScale === "sm" ? "bg-primary text-white" : "text-white/70"}`}
-            >
-              A-
-            </Button>
-            <Button 
-              size="icon" 
-              variant="ghost" 
-              onClick={() => setFontScale("base")}
-              className={`h-7 w-7 text-xs ${fontScale === "base" ? "bg-primary text-white" : "text-white/70"}`}
-            >
-              A
-            </Button>
-            <Button 
-              size="icon" 
-              variant="ghost" 
-              onClick={() => setFontScale("lg")}
-              className={`h-7 w-7 text-xs ${fontScale === "lg" ? "bg-primary text-white" : "text-white/70"}`}
-            >
-              A+
-            </Button>
-          </div>
-
-          {/* Candidate Info */}
-          <div className="hidden md:flex flex-col items-end text-xs">
-            <span className="font-bold text-white/95 capitalize">{candidateName}</span>
-            <span className="text-white/60 font-mono text-[10px]">{candidateId}</span>
-          </div>
-
-          <a href="/dashboard" className="text-xs font-bold text-[#ffc72c] hover:underline">
-            Exit
-          </a>
-        </div>
-      </header>
-
-      {/* Main split-screen Workspace */}
-      <div className="flex-1 flex overflow-hidden">
-        {!result ? (
-          <div className="flex flex-1 overflow-hidden flex-col lg:flex-row">
-            
-            {/* Left Panel: recorded examiner prompt */}
-            <div className="flex-1 bg-slate-950 p-6 flex flex-col justify-between relative border-b lg:border-b-0 lg:border-r border-slate-800">
-              <div className="flex justify-between items-center z-10">
-                    <div className="flex items-center gap-2 bg-slate-900/80 border border-slate-700/50 backdrop-blur px-3 py-1.5 rounded-lg text-[10px] text-white font-bold tracking-wider uppercase">
-                      <span className="h-2 w-2 rounded-full bg-amber-400" />
-                      Recorded examiner simulation
-                    </div>
-                    <div className="bg-slate-900/80 border border-slate-700/50 backdrop-blur px-3 py-1.5 rounded-lg text-[10px] text-white/70 font-semibold font-mono">
-                      Part {currentPart.part}
-                    </div>
-              </div>
-
-              <div className="flex-1 flex flex-col items-center justify-center py-8 relative">
-                    <div className={`w-full max-w-xl aspect-video bg-slate-900 border-4 rounded-2xl relative overflow-hidden shadow-2xl transition-all duration-300 ${
-                      isSpeakingPrompt ? "border-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.3)]" : "border-slate-800"
-                    }`}>
-                      <img
-                        src="/examiner.png"
-                        alt="Dr. Sarah Jenkins"
-                        className={`w-full h-full object-cover transition-transform duration-500 ${isSpeakingPrompt ? "scale-105" : "scale-100"}`}
-                      />
-                      <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur px-2.5 py-1 rounded-md text-[10px] text-white font-semibold">
-                        Dr. Sarah Jenkins (Recorded Examiner)
-                      </div>
-                      {isSpeakingPrompt && (
-                        <div className="absolute top-2 right-2 bg-emerald-500 text-white text-[9px] font-bold uppercase tracking-widest px-2.5 py-1 rounded animate-pulse">
-                          Speaking
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="absolute bottom-2 left-0 right-0 mx-auto max-w-lg bg-black/75 border border-slate-800 backdrop-blur rounded-xl p-4 text-center">
-                      <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mb-1.5 flex items-center justify-center gap-1">
-                        <Volume2 className="h-3.5 w-3.5 text-[#ffc72c]" /> Closed Captions
-                      </p>
-                      <p className={`${getTextSizeClass()} text-white leading-relaxed font-medium`}>
-                        &ldquo;{currentPart.question}&rdquo;
-                      </p>
-                      <Button
-                        onClick={speakQuestion}
-                        variant="ghost"
-                        size="xs"
-                        className="mt-2 text-[10px] text-[#ffc72c] h-6 border border-[#ffc72c]/30 hover:bg-[#ffc72c]/10 hover:text-[#ffb700]"
-                        disabled={isSpeakingPrompt}
-                      >
-                        {isSpeakingPrompt ? "Examiner Speaking..." : "Play Voice Prompts"}
-                      </Button>
-                    </div>
-              </div>
-            </div>
-
-            {/* Right Panel: Candidate Workspace (Webcam stream mockup & Prep / controls) */}
-            <div className="w-full lg:w-[480px] xl:w-[540px] overflow-y-auto bg-muted/15 p-6 flex flex-col justify-between shrink-0" style={{
-              scrollbarColor: "var(--scrollbar-thumb) var(--scrollbar-track)",
-              scrollbarWidth: "thin"
-            }}>
-              
-              <div className="space-y-6 flex-grow">
-                {/* 1. Candidate Webcam container */}
-                <div className="aspect-video bg-slate-900 border border-slate-800 rounded-xl relative overflow-hidden flex flex-col items-center justify-center shadow-md">
-                  <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/60 px-2 py-0.5 rounded text-[9px] text-white font-bold font-mono z-10">
-                    {isRecording ? (
-                      <>
-                        <span className="h-1.5 w-1.5 rounded-full bg-rose-500 animate-ping" />
-                        REC LIVE
-                      </>
-                    ) : (
-                      <>
-                        <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
-                        PREVIEW ONLY
-                      </>
-                    )}
-                  </div>
-
-                  {cameraStream ? (
-                    <video
-                      ref={videoRef}
-                      autoPlay
-                      playsInline
-                      muted
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex flex-col items-center gap-2">
-                      <Mic className={`h-12 w-12 text-slate-700 ${isRecording ? "text-primary animate-pulse" : ""}`} />
-                    </div>
-                  )}
-
-                  <div className="absolute bottom-2 right-2 text-[9px] text-slate-400 bg-black/60 px-2 py-0.5 rounded font-mono font-bold capitalize z-10">
-                    {candidateName}
-                  </div>
-
-                  {/* Camera toggle button */}
-                  <div className="absolute top-2 right-2 z-10">
-                    <Button
-                      onClick={toggleCamera}
-                      variant="outline"
-                      size="xs"
-                      className="text-[9px] h-5 bg-black/60 border-white/25 hover:bg-black/90 text-white font-bold"
-                    >
-                      {cameraStream ? "Camera On" : "Turn On Camera"}
-                    </Button>
-                  </div>
-
-                  {/* Audio Visualizer Wave overlay */}
-                  {isRecording && (
-                    <div className="absolute bottom-2 left-2 flex items-end gap-1 h-6">
-                      {[...Array(8)].map((_, i) => (
-                        <div
-                          key={i}
-                          className="w-0.5 bg-primary rounded-full speaking-bar"
-                          style={{
-                            height: `${[30, 80, 50, 90, 60, 40, 70, 30][i]}%`,
-                            animationDelay: `${i * 0.1}s`
-                          }}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* 2. Cue Card Info / Prep Timers */}
-                {currentPart.part === 2 && (
-                  <Card className="border-amber-100 bg-amber-50/10 shadow-xs">
-                    <CardHeader className="p-4 pb-2 border-b border-amber-100/30">
-                      <CardTitle className="text-xs font-bold text-amber-600 uppercase tracking-widest flex items-center gap-2">
-                        <Clock className="h-4 w-4" /> Part 2 Cue Card (Long Turn)
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-4 space-y-3">
-                      {isPrepping ? (
-                        <div className="text-center space-y-1 py-2">
-                          <div className="text-[10px] font-bold text-amber-500 uppercase tracking-wider">Preparation Countdown</div>
-                          <div className="text-3xl font-black text-amber-500 font-mono animate-pulse">{prepSeconds}s</div>
-                          <p className="text-[10px] text-muted-foreground">Recording will auto-start. Note points below.</p>
-                          <Button onClick={startRecording} size="sm" className="mt-2 h-7 bg-amber-500 hover:bg-amber-600 text-[10px]">
-                            Skip & Speak Now
-                          </Button>
-                        </div>
-                      ) : (
-                        <div className="flex gap-2">
-                          <Button onClick={startPrepTimer} size="sm" variant="outline" className="text-xs h-9 border-amber-300 text-amber-600 hover:bg-amber-50/50">
-                            Start 1-Min Prep
-                          </Button>
-                          <Button onClick={startRecording} size="sm" className="text-xs h-9 bg-primary">
-                            Speak Directly
-                          </Button>
-                        </div>
-                      )}
-
-                      {/* notepad for cue card */}
-                      <div className="space-y-1 mt-2">
-                        <label className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground block">Digital Notepad (Cue Card Notes)</label>
-                        <Textarea 
-                          placeholder="Jot down prompt bullet points here during prep time..."
-                          value={notepadText}
-                          onChange={(e) => setNotepadText(e.target.value)}
-                          className="min-h-[80px] text-xs font-sans leading-relaxed"
-                        />
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* 3. Recording Progress Controls */}
-                <div className="bg-background rounded-xl p-4 border border-muted/50 flex flex-col items-center justify-center space-y-3 shadow-xs">
-                  {isRecording ? (
-                    <div className="text-center space-y-2">
-                      <div className="text-[10px] font-bold text-rose-500 uppercase tracking-widest animate-pulse">Recording Speech</div>
-                      <div className="text-3xl font-black font-mono text-foreground">{getTimerString(recordingSeconds)}</div>
-                      <Button onClick={stopRecording} variant="destructive" size="icon" className="h-10 w-10 rounded-full flex items-center justify-center p-0 shadow-md">
-                        <Square className="h-4 w-4 fill-current" />
-                      </Button>
-                    </div>
-                  ) : currentPart.part !== 2 ? (
-                    <div className="text-center space-y-1.5 py-1">
-                      <p className="text-xs text-muted-foreground">Click below to record your Part {currentPart.part} response.</p>
-                      <Button onClick={startRecording} size="lg" className="h-10 bg-primary gap-1.5">
-                        <Mic className="h-4 w-4" /> Record Response
-                      </Button>
-                    </div>
-                  ) : (
-                    !isPrepping && (
-                      <p className="text-xs text-muted-foreground text-center">Start preparation timer or direct recording above.</p>
-                    )
-                  )}
-                </div>
-
-                {/* 4. Speech Transcript display */}
-                {(isTranscribing || transcript) && (
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground block">Response Transcription</label>
-                    {isTranscribing ? (
-                      <div className="rounded-xl border border-muted/50 p-4 bg-background/50 flex items-center gap-3 text-xs text-muted-foreground">
-                        <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
-                        <span>Transcribing your speech with Whisper AI...</span>
-                      </div>
-                    ) : (
-                      <p className="rounded-xl border border-muted/50 p-4 bg-background/50 text-xs text-foreground leading-relaxed font-medium max-h-[140px] overflow-y-auto">
-                        {transcript}
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {isGrading && (
-                  <div className="space-y-1 mt-3">
-                    <label className="text-[9px] font-bold uppercase tracking-wider text-primary block flex items-center gap-1.5">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping" />
-                      Live AI Examiner Feedback Stream
-                    </label>
-                    <div className="rounded-xl border border-emerald-500/20 bg-background/50 backdrop-blur-md p-4 text-[11px] font-mono text-foreground leading-relaxed h-[140px] overflow-y-auto whitespace-pre-wrap shadow-inner relative">
-                      <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-violet-500 via-primary to-emerald-500 animate-pulse" />
-                      {streamingText || "Analysing speech, vocabulary, and grammar..."}
-                      <span className="inline-block w-1 h-3 bg-primary ml-0.5 animate-pulse" />
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Action buttons (Grade) */}
-              {transcript && !isTranscribing && !isRecording && (
-                <div className="border-t border-muted/50 pt-4 mt-6 flex justify-between items-center">
-                  <Button onClick={handleReset} variant="ghost" size="sm" className="gap-1 text-muted-foreground text-xs">
-                    <RefreshCw className="h-3.5 w-3.5" /> Reset Response
-                  </Button>
-                  <Button onClick={handleEvaluate} size="sm" disabled={isGrading} className="gap-1 text-xs">
-                    {isGrading ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" /> Evaluating...
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle className="h-4 w-4" /> Submit Response
-                      </>
-                    )}
-                  </Button>
-                </div>
-              )}
-            </div>
-          </div>
-        ) : (
-          // Full-screen Speaking Grade Report
-          <div className="flex-1 overflow-y-auto bg-background px-8 py-8" style={{
-            scrollbarColor: "var(--scrollbar-thumb) var(--scrollbar-track)",
-            scrollbarWidth: "thin"
-          }}>
-            <div className="max-w-4xl mx-auto space-y-6">
-              <div className="flex justify-between items-center">
-                <h2 className="text-xl font-bold">IELTS Speaking Grade Report</h2>
-                <Button onClick={() => setResult(null)} variant="outline" size="sm" className="h-8">
-                  <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                  Evaluate New Speaking
-                </Button>
-              </div>
-
-              {/* Score summary block */}
-              <Card className="shadow-md border-muted/50">
-                <CardHeader className="pb-3 text-center">
-                  <CardTitle className="text-base font-bold">Estimated Speaking Band</CardTitle>
-                </CardHeader>
-                <CardContent className="flex flex-col items-center justify-center space-y-3">
-                  <div className="relative flex h-24 w-24 items-center justify-center rounded-full border-4 border-primary/10 bg-primary/5 shadow-xs">
-                    <div className="text-center">
-                      <span className="text-3xl font-black text-primary font-mono block leading-none">
-                        {result.band_score.toFixed(1)}
-                      </span>
-                      <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-widest mt-1 block">
-                        Band
-                      </span>
-                    </div>
-                  </div>
-                  <div className="text-center space-y-0.5">
-                    <h3 className="font-extrabold text-base text-foreground">Speaking Performance</h3>
-                    <p className="text-xs text-muted-foreground text-center">
-                      AI is evaluating lexical grammar range, vocabulary collocations, fluency speed, and pronunciation features.
-                    </p>
-                  </div>
-
-                  {/* Criteria Grid */}
-                  <div className="grid grid-cols-2 gap-4 w-full max-w-xl pt-4">
-                    {[
-                      { label: "Fluency & Coherence", score: result.fluency_coherence },
-                      { label: "Lexical Resource", score: result.lexical_resource },
-                      { label: "Grammatical Range & Accuracy", score: result.grammatical_range },
-                      { label: "Pronunciation Estimate", score: result.pronunciation },
-                    ].map((item, idx) => (
-                      <div key={idx} className="p-3 rounded-xl border border-muted/50 bg-background/50 space-y-1">
-                        <div className="text-[10px] font-semibold text-muted-foreground leading-tight truncate">{item.label}</div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-base font-extrabold font-mono text-foreground">
-                            Band {item.score?.toFixed(1) || "N/A"}
-                          </span>
-                          <span className={`h-2 w-2 rounded-full ${
-                            item.score >= 7.0 ? "bg-emerald-500" : item.score >= 6.0 ? "bg-blue-500" : "bg-amber-500"
-                          }`} />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Examiner comments */}
-              <Card className="shadow-md border-muted/50">
-                <CardHeader>
-                  <CardTitle className="text-lg font-bold flex items-center gap-2">
-                    Examiner Comments
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
-                    {result.examiner_comments}
-                  </p>
-                </CardContent>
-              </Card>
-
-              {/* Speaking suggestions */}
-              <Card className="shadow-md border-muted/50">
-                <CardHeader>
-                  <CardTitle className="text-lg font-bold">Key Vocabulary & Fluency Upgrades</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ul className="space-y-2.5">
-                    {result.improvements.map((imp, idx) => (
-                      <li key={idx} className="flex items-start gap-2.5 text-sm text-muted-foreground leading-relaxed">
-                        <CheckCircle className="h-5 w-5 text-primary shrink-0 mt-0.5" />
-                        <span>{imp}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </CardContent>
-              </Card>
-
-              {/* Candidate Transcript Reference */}
-              <Card className="shadow-md border-muted/50">
-                <CardHeader>
-                  <CardTitle className="text-lg font-bold">Your Response Transcript</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap bg-muted/10 p-4 rounded-xl border border-muted/50 font-sans select-text">
-                    {transcript}
-                  </p>
-                </CardContent>
-              </Card>
-
-              {/* Part controls */}
-              {currentPartIdx < SPEAKING_PARTS.length - 1 ? (
-                <Button onClick={handleNextPart} className="w-full h-11">
-                  Advance to Part {currentPart.part + 1}
-                </Button>
+      >
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:items-start">
+          {/* The question, as the examiner gives it */}
+          <div className="contents lg:col-span-7 lg:flex lg:flex-col lg:gap-4">
+            <div key={currentPartIdx} className="t-swap order-1 lg:order-none">
+              {currentPart.cue ? (
+                <CueCard {...currentPart.cue} />
               ) : (
-                <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 text-center space-y-2">
-                  <p className="text-sm text-primary font-bold">
-                    🎉 Outstanding job! You have completed all parts of the speaking examiner simulation.
-                  </p>
-                  <a href="/dashboard">
-                    <Button size="sm" className="mt-1">
-                      Return to Dashboard
-                    </Button>
-                  </a>
+                <section className="rounded-2xl border border-[#d9d3c9] bg-sheet p-6 sm:p-8">
+                  <p className="mb-5 text-sm text-soft">The examiner asks</p>
+                  <p className="text-[22px] leading-snug font-medium text-ink sm:text-[24px]">{currentPart.question}</p>
+                </section>
+              )}
+            </div>
+
+            <div className="order-2 flex flex-wrap items-center gap-3 px-1 lg:order-none">
+              <Button onClick={speakQuestion} variant="secondary" size="sm" disabled={isSpeakingPrompt}>
+                <Volume2 />
+                {isSpeakingPrompt ? <span className="t-shimmer">Examiner speaking</span> : "Hear the question"}
+              </Button>
+              <p className="text-sm text-soft">Listen first, as you would in the test room.</p>
+            </div>
+
+            {currentPart.part === 2 && (
+              <Panel title="Your notes" aside="Not marked" className="order-4 lg:order-none">
+                <label htmlFor="cue-notes" className="sr-only">
+                  Notes for the cue card
+                </label>
+                <Textarea
+                  id="cue-notes"
+                  placeholder="A few words for each point on the card"
+                  value={notepadText}
+                  onChange={(e) => setNotepadText(e.target.value)}
+                  className="min-h-[112px] text-[17px]"
+                />
+              </Panel>
+            )}
+
+            <Panel className="order-5 lg:order-none" title="Your transcript" aside={transcript && !isTranscribing ? `${transcriptWords} words` : undefined}>
+              {isTranscribing ? (
+                <div className="flex flex-col gap-2.5 py-1" aria-busy>
+                  <div className="t-skel h-4 w-full" />
+                  <div className="t-skel h-4 w-11/12" />
+                  <div className="t-skel h-4 w-2/3" />
+                </div>
+              ) : transcript ? (
+                <p className="t-revealed max-w-[70ch] text-[17px] leading-[1.7] text-ink">{transcript}</p>
+              ) : (
+                <p className="text-[15px] leading-relaxed text-soft">Your words appear here after you stop recording.</p>
+              )}
+            </Panel>
+          </div>
+
+          {/* The recorder: one figure, one state, one action */}
+          <section
+            aria-label="Recorder"
+            className="order-3 flex flex-col rounded-2xl bg-panel p-5 sm:p-6 lg:sticky lg:order-none lg:top-6 lg:col-span-5 lg:min-h-[420px]"
+          >
+            <div className="flex items-center gap-2.5">
+              {(phase === "recording" || phase === "preparing") && (
+                <span
+                  aria-hidden
+                  className={cn(
+                    "size-2.5 rounded-full motion-reduce:animate-none",
+                    phase === "recording" ? "animate-pulse bg-teal" : "bg-ink"
+                  )}
+                />
+              )}
+              <h2 key={phase} className="t-swap text-[15px] font-semibold text-ink">
+                {phaseLabel}
+              </h2>
+            </div>
+
+            <div className="mt-8 mb-6">
+              <p
+                className={cn(
+                  "tabular text-[72px] leading-none text-ink sm:text-[88px]",
+                  (phase === "idle" || phase === "transcribing" || phase === "marking") && "text-soft"
+                )}
+                aria-live={phase === "recording" || phase === "preparing" ? "off" : undefined}
+              >
+                {bigFigure}
+              </p>
+              <p className="mt-3 text-[15px] text-soft">{bigCaption}</p>
+              {phase === "recording" && (
+                <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-putty" aria-hidden>
+                  <div
+                    className="h-full rounded-full bg-teal transition-[width] duration-1000 ease-linear motion-reduce:transition-none"
+                    style={{ width: `${Math.min(1, recordingSeconds / limitSeconds) * 100}%` }}
+                  />
                 </div>
               )}
-
+              {phase === "preparing" && (
+                <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-putty" aria-hidden>
+                  <div
+                    className="h-full rounded-full bg-ink transition-[width] duration-1000 ease-linear motion-reduce:transition-none"
+                    style={{ width: `${((60 - prepSeconds) / 60) * 100}%` }}
+                  />
+                </div>
+              )}
             </div>
-          </div>
-        )}
-      </div>
-    </div>
+
+            {(phase === "transcribing" || phase === "marking") && (
+              <p className="mb-6 text-[17px]">
+                {phase === "transcribing" ? (
+                  <ThinkingStatus states={["Transcribing your answer", "Turning speech into text"]} />
+                ) : (
+                  <ThinkingStatus states={marking} />
+                )}
+              </p>
+            )}
+
+            {speakError && phase !== "marking" && phase !== "transcribing" && (
+              <div role="alert" className="t-rise mb-5 rounded-xl bg-bad-tint p-4 text-[15px] leading-relaxed">
+                <p className="font-medium text-bad">That did not go through.</p>
+                <p className="mt-1 text-ink">{speakError} Wait a minute and try again.</p>
+              </div>
+            )}
+
+            <div className="mt-auto flex flex-col gap-2.5">
+              {phase === "idle" &&
+                (currentPart.part === 2 ? (
+                  <>
+                    <Button onClick={startPrepTimer} variant="accent" size="lg">
+                      Start 1:00 preparation
+                    </Button>
+                    <Button onClick={startRecording} variant="secondary" size="lg">
+                      <Mic /> Skip and speak now
+                    </Button>
+                  </>
+                ) : (
+                  <Button onClick={startRecording} variant="accent" size="lg">
+                    <Mic /> Start recording
+                  </Button>
+                ))}
+              {phase === "preparing" && (
+                <Button onClick={startRecording} variant="accent" size="lg">
+                  <Mic /> Start speaking now
+                </Button>
+              )}
+              {phase === "recording" && (
+                <Button onClick={stopRecording} variant="default" size="lg">
+                  <Square className="fill-current" /> Stop recording
+                </Button>
+              )}
+              {phase === "recorded" && (
+                <>
+                  <Button onClick={handleEvaluate} variant="accent" size="lg">
+                    {speakError ? "Mark it again" : "Mark my answer"}
+                  </Button>
+                  <Button onClick={handleReset} variant="ghost" size="lg">
+                    Record again
+                  </Button>
+                </>
+              )}
+            </div>
+
+            <div className="mt-6 border-t border-border pt-4">
+              {cameraStream && (
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  aria-label={`Camera preview for ${candidateName}`}
+                  className="mb-3 aspect-video w-full rounded-xl bg-ink object-cover"
+                />
+              )}
+              <button
+                type="button"
+                onClick={toggleCamera}
+                className="text-sm text-soft underline decoration-1 underline-offset-4 hover:text-ink hover:decoration-2"
+              >
+                {cameraStream ? "Turn camera preview off" : "Practise on camera (preview only, not recorded)"}
+              </button>
+            </div>
+          </section>
+        </div>
+      </PageColumn>
+    </AppShell>
+  );
+}
+
+function SpeakingSkeleton() {
+  return (
+    <AppShell title="Speaking">
+      <PageColumn title="Speaking" lead="Getting the examiner ready.">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-12" aria-busy>
+          <div className="t-skel h-[300px] rounded-2xl lg:col-span-7" />
+          <div className="t-skel h-[420px] rounded-2xl lg:col-span-5" />
+        </div>
+      </PageColumn>
+    </AppShell>
   );
 }
 
 export default function SpeakingPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="flex min-h-screen items-center justify-center bg-background">
-          <div className="text-center space-y-4">
-            <Loader2 className="h-10 w-10 animate-spin text-primary mx-auto" />
-            <p className="text-sm text-muted-foreground">Loading speaking module...</p>
-          </div>
-        </div>
-      }
-    >
+    <Suspense fallback={<SpeakingSkeleton />}>
       <SpeakingPageContent />
     </Suspense>
   );

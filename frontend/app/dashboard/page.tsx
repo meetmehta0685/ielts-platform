@@ -1,40 +1,43 @@
+import Link from "next/link";
+import type { CSSProperties } from "react";
 import { redirect } from "next/navigation";
 import { requireServerUser } from "@/lib/supabase-server";
-import { loadTrackRecord } from "@/lib/track-record";
-import { LogoutButton } from "@/components/auth/logout-button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { loadTrackRecord, type TrackRecordEntry } from "@/lib/track-record";
+import { AppShell, PageColumn, Panel } from "@/components/app/app-shell";
+import { Reveal } from "@/components/motion/reveal";
 import { Button } from "@/components/ui/button";
-import { 
-  Target, 
-  Calendar, 
-  Clock, 
-  AlertTriangle, 
-  ChevronRight, 
-  BookOpen, 
-  GraduationCap, 
-  Compass,
-  Sparkles,
-  MessageSquare,
-  Mic,
-  PenTool,
-  Headset,
-  Award
-} from "lucide-react";
-import { DashboardCharts } from "@/components/dashboard/dashboard-charts";
+import { BandTrend, type BandPoint } from "@/components/dashboard/band-trend";
+import { PlanTick } from "@/components/dashboard/plan-tick";
+import {
+  currentWeekIndex,
+  mockWhen,
+  nextMock,
+  taskKey,
+  type StudyPlanData,
+} from "@/components/planner/plan-utils";
+import { attemptHref, bandOf, formatBand } from "@/components/records/record-utils";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+/** IELTS order: the test is sat Listening, Reading, Writing, then Speaking. */
+const MODULES = [
+  { key: "listening", name: "Listening", unit: ["test", "tests"] },
+  { key: "reading", name: "Reading", unit: ["test", "tests"] },
+  { key: "writing", name: "Writing", unit: ["essay", "essays"] },
+  { key: "speaking", name: "Speaking", unit: ["answer", "answers"] },
+] as const;
+
+type ModuleName = (typeof MODULES)[number]["name"];
+
+const shortDate = (iso: string) =>
+  new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+
+const stagger = (i: number) => ({ "--i": i }) as CSSProperties;
 
 export default async function DashboardPage() {
   const { supabase, user, accessToken } = await requireServerUser("/dashboard");
 
-  const [{ data: profile }, stats, trackRecord] = await Promise.all([
+  const [{ data: profile }, stats, trackRecord, planResult] = await Promise.all([
     supabase.from("profiles").select("*").eq("id", user.id).maybeSingle(),
     fetch(`${BACKEND_URL}/api/dashboard/stats`, {
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -46,6 +49,7 @@ export default async function DashboardPage() {
         return null;
       }),
     loadTrackRecord(supabase, user.id),
+    supabase.from("study_plans").select("plan_json").eq("user_id", user.id).maybeSingle(),
   ]);
 
   // If no profile exists yet, or they haven't finished onboarding, redirect them
@@ -53,403 +57,297 @@ export default async function DashboardPage() {
     redirect("/complete-profile");
   }
 
+  const target = Number(profile.target_band);
+  const firstName =
+    (profile.full_name as string | null)?.trim().split(/\s+/)[0] ||
+    (user.user_metadata?.full_name as string | undefined)?.split(" ")[0] ||
+    user.email?.split("@")[0] ||
+    "Hello";
+
   // Calculate days remaining to exam
   const today = new Date();
   const examDate = new Date(profile.exam_date);
-  const diffTime = examDate.getTime() - today.getTime();
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  const daysText = diffDays > 0 ? `${diffDays} days left` : diffDays === 0 ? "Exam is today!" : "Exam passed";
-
-  // Formatted exam date
-  const formattedExamDate = examDate.toLocaleDateString("en-US", {
+  const diffDays = Math.ceil((examDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  const title =
+    diffDays > 1
+      ? `${firstName}, ${diffDays} days to your exam.`
+      : diffDays === 1
+        ? `${firstName}, your exam is tomorrow.`
+        : diffDays === 0
+          ? `${firstName}, your exam is today.`
+          : `${firstName}, your exam date has passed.`;
+  const examDay = examDate.toLocaleDateString("en-GB", {
     weekday: "long",
-    year: "numeric",
-    month: "long",
     day: "numeric",
+    month: "long",
+    year: "numeric",
   });
 
+  // Per-module figures. The backend's averages are used when they load; otherwise the same
+  // average is computed from the track record so the tiles never go blank on a backend hiccup.
+  const graded = trackRecord.filter((r) => bandOf(r) != null);
+  const perModule = MODULES.map((m) => {
+    const rows = graded.filter((r) => r.module === m.name);
+    const fromStats = stats?.averages?.[m.key];
+    const avg =
+      rows.length === 0
+        ? null
+        : typeof fromStats === "number" && fromStats > 0
+          ? fromStats
+          : rows.reduce((a, r) => a + (bandOf(r) ?? 0), 0) / rows.length;
+    return { ...m, count: rows.length, avg };
+  });
+
+  // The practice to start: the first focus module, else the lowest average, else Writing.
+  const weakAreas: string[] = Array.isArray(profile.weak_areas) ? profile.weak_areas : [];
+  const lowest = [...perModule].filter((m) => m.avg != null).sort((a, b) => (a.avg ?? 0) - (b.avg ?? 0))[0];
+  const practise: ModuleName =
+    (MODULES.find((m) => m.name === weakAreas[0])?.name as ModuleName | undefined) ?? lowest?.name ?? "Writing";
+
+  const points: BandPoint[] = [...graded]
+    .reverse()
+    .slice(-12)
+    .map((r) => ({ t: new Date(r.date).getTime(), band: bandOf(r)!, module: r.module, title: r.title }));
+
+  const plan = (planResult.data?.plan_json ?? null) as StudyPlanData | null;
+  const planFailed = Boolean(planResult.error);
+  const hasPlan = Boolean(plan?.weekly_plans?.length);
+
+  // Distance to target for every module, lowest first; focus modules are named in ink.
+  const gapRows = [...perModule].sort((a, b) => (a.avg ?? -1) - (b.avg ?? -1));
+  const SCALE_LO = 4;
+  const pos = (band: number) => `${Math.min(Math.max((band - SCALE_LO) / (9 - SCALE_LO), 0), 1) * 100}%`;
+
   return (
-    <div className="min-h-screen bg-stone-50 text-slate-800 font-sans relative overflow-hidden flex flex-col justify-between">
-      {/* Background Grid Pattern (Warm paper grid texture matching landing page) */}
-      <div className="absolute inset-0 bg-[radial-gradient(#efebe4_1.5px,transparent_1.5px)] [background-size:24px_24px] opacity-60 pointer-events-none" />
-
-      {/* Background ambient light */}
-      <div className="absolute top-[-15%] left-[-10%] w-[400px] h-[400px] rounded-full bg-blue-950/5 blur-[120px] pointer-events-none" />
-      <div className="absolute top-[40%] right-[-10%] w-[500px] h-[500px] rounded-full bg-amber-500/5 blur-[150px] pointer-events-none" />
-
-      {/* Top Navigation */}
-      <header className="sticky top-0 z-50 border-b border-stone-200/60 bg-white/85 backdrop-blur-md">
-        <div className="mx-auto flex max-w-7xl h-16 items-center justify-between px-4 sm:px-6 lg:px-8">
-          <a href="/dashboard" className="flex items-center">
-            <img src="/logo.png" alt="AI IELTS Logo" className="h-20 w-auto object-contain" />
-          </a>
-          <div className="flex items-center gap-4 sm:gap-6">
-            <a
-              href="/planner"
-              className="text-xs sm:text-sm font-semibold text-slate-500 hover:text-blue-950 transition-colors"
+    <AppShell title="Home">
+      <PageColumn
+        title={title}
+        lead={
+          <>
+            Aiming for Band {target.toFixed(1)} on {examDay}, studying {profile.study_hours_per_day}{" "}
+            {Number(profile.study_hours_per_day) === 1 ? "hour" : "hours"} a day.{" "}
+            <Link
+              href="/complete-profile"
+              className="whitespace-nowrap text-ink underline decoration-1 underline-offset-4 hover:decoration-2"
             >
-              Study Roadmap
-            </a>
-            <a
-              href="/simulator"
-              className="text-xs sm:text-sm font-semibold text-slate-500 hover:text-blue-950 transition-colors"
-            >
-              Exam Simulator
-            </a>
-            <a
-              href="/chat"
-              className="text-xs sm:text-sm font-semibold text-amber-800 hover:text-blue-950 transition-colors flex items-center gap-1.5 bg-amber-50/50 hover:bg-amber-100 px-2.5 py-1 rounded-lg border border-amber-200/60"
-            >
-              <Sparkles className="h-3.5 w-3.5 text-amber-600 fill-amber-500/20 animate-pulse" />
-              AI Mentor Chat
-            </a>
-            <LogoutButton variant="ghost" size="sm" className="font-semibold text-slate-500 hover:text-blue-950" />
-          </div>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 space-y-8 flex-1 relative z-10 w-full">
-        
-        {/* Welcome Section */}
-        <div className="rounded-2xl border border-stone-200/60 bg-white bg-gradient-to-r from-amber-500/[0.04] via-stone-50/30 to-transparent p-6 sm:p-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-6 shadow-[0_8px_30px_rgb(0,0,0,0.02)]">
-          <div className="space-y-2 text-left">
-            <h1 className="text-3xl font-extrabold tracking-tight text-blue-950 sm:text-4xl">
-              Welcome back, {profile.full_name || "Scholar"}! ✨
-            </h1>
-            <p className="text-sm text-slate-500 font-medium max-w-xl">
-              Track your daily progress, review analytical breakdowns, and practice modular exam sheets with your AI Mentor.
-            </p>
-          </div>
-          <a href="/simulator" className="w-full md:w-auto">
-            <Button className="h-11 w-full md:w-auto bg-blue-950 hover:bg-blue-900 text-white font-semibold rounded-xl shadow-md shadow-blue-950/15 transition-all duration-200 hover:scale-[1.01] active:scale-[0.99] gap-2">
-              <GraduationCap className="h-5 w-5" />
-              Start Exam Simulation
+              Change
+            </Link>
+          </>
+        }
+        actions={
+          <>
+            <Button asChild variant="accent">
+              <Link href={`/${practise.toLowerCase()}`}>Practise {practise}</Link>
             </Button>
-          </a>
-        </div>
-
-        {/* Dashboard Grid */}
-        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {/* Target Band score card */}
-          <Card className="rounded-2xl border-stone-200/60 shadow-[0_8px_30px_rgb(0,0,0,0.02)] bg-white hover:shadow-md transition-all duration-300">
-            <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-              <div className="text-left">
-                <CardTitle className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-                  Target Band Score
-                </CardTitle>
-                <CardDescription className="text-xs text-slate-400 mt-0.5">Your exam goal</CardDescription>
-              </div>
-              <div className="rounded-xl bg-amber-50 p-2.5 text-amber-700 border border-amber-100">
-                <Target className="h-5 w-5" />
-              </div>
-            </CardHeader>
-            <CardContent className="pt-2 text-left">
-              <div className="flex items-baseline gap-2">
-                <span className="text-4xl font-extrabold text-slate-800">
-                  Band {Number(profile.target_band).toFixed(1)}
+            <Button asChild variant="secondary">
+              <Link href="/simulator">Sit the full mock</Link>
+            </Button>
+          </>
+        }
+      >
+        <Reveal className="grid grid-cols-2 gap-4 lg:grid-cols-12">
+          {/* Four module tiles, 3 columns each */}
+          {perModule.map((m, i) => (
+            <Link
+              key={m.key}
+              href={`/${m.key}`}
+              style={stagger(i)}
+              className="t-stagger-line group col-span-1 flex min-h-[128px] flex-col justify-between rounded-2xl bg-panel p-4 transition-colors duration-[var(--duration-quick)] hover:bg-panel-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal lg:col-span-3"
+            >
+              <span className="flex items-baseline justify-between text-[15px] font-medium text-ink">
+                {m.name}
+                <span aria-hidden className="text-soft opacity-0 transition-opacity duration-[var(--duration-quick)] group-hover:opacity-100">
+                  Practise
                 </span>
-                {profile.current_band && (
-                  <span className="text-xs text-slate-400 font-semibold bg-stone-50 px-2 py-0.5 rounded border border-stone-200/60">
-                    Baseline: {Number(profile.current_band).toFixed(1)}
-                  </span>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Timeline exam date card */}
-          <Card className="rounded-2xl border-stone-200/60 shadow-[0_8px_30px_rgb(0,0,0,0.02)] bg-white hover:shadow-md transition-all duration-300">
-            <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-              <div className="text-left">
-                <CardTitle className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-                  Exam Timeline
-                </CardTitle>
-                <CardDescription className="text-xs text-slate-400 mt-0.5">{daysText}</CardDescription>
-              </div>
-              <div className="rounded-xl bg-stone-50 p-2.5 text-slate-700 border border-stone-200/60">
-                <Calendar className="h-5 w-5" />
-              </div>
-            </CardHeader>
-            <CardContent className="pt-2 text-left">
-              <span className="text-lg font-bold text-slate-700 block truncate">
-                {formattedExamDate}
               </span>
-            </CardContent>
-          </Card>
-
-          {/* Daily Study Hours Card */}
-          <Card className="rounded-2xl border-stone-200/60 shadow-[0_8px_30px_rgb(0,0,0,0.02)] bg-white hover:shadow-md transition-all duration-300 sm:col-span-2 lg:col-span-1">
-            <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-              <div className="text-left">
-                <CardTitle className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-                  Study Commitment
-                </CardTitle>
-                <CardDescription className="text-xs text-slate-400 mt-0.5">Recommended daily review</CardDescription>
-              </div>
-              <div className="rounded-xl bg-blue-50/80 p-2.5 text-blue-950 border border-blue-100/60">
-                <Clock className="h-5 w-5" />
-              </div>
-            </CardHeader>
-            <CardContent className="pt-2 text-left">
-              <span className="text-4xl font-extrabold text-slate-800">
-                {profile.study_hours_per_day} hrs
+              <span>
+                <span className="tabular block text-[30px] leading-none text-ink">
+                  {m.avg != null ? m.avg.toFixed(1) : "—"}
+                </span>
+                <span className="mt-2 block text-sm text-soft">
+                  {m.count === 0
+                    ? "No attempts yet"
+                    : `${m.count} ${m.unit[m.count === 1 ? 0 : 1]} marked`}
+                </span>
               </span>
-              <span className="text-xs font-semibold text-slate-400 ml-1">/ day</span>
-            </CardContent>
-          </Card>
-        </div>
+            </Link>
+          ))}
 
-        {/* Recharts Analytics Charts */}
-        <DashboardCharts 
-          history={stats?.history || []} 
-          averages={stats?.averages || { writing: 0, speaking: 0, reading: 0, listening: 0 }} 
-          targetBand={Number(profile.target_band)} 
-        />
-
-        {/* Bottom Modules & Focus Area Grid */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          {/* Weak Focus Areas */}
-          <Card className="rounded-2xl border-stone-200/60 shadow-[0_8px_30px_rgb(0,0,0,0.02)] bg-white lg:col-span-1 flex flex-col justify-between">
-            <div>
-              <CardHeader className="text-left">
-                <CardTitle className="flex items-center gap-2 text-lg font-bold text-blue-950">
-                  <AlertTriangle className="h-5 w-5 text-amber-700 fill-amber-50/50" />
-                  Focus Modules
-                </CardTitle>
-                <CardDescription className="text-slate-400 font-medium">
-                  Areas requiring your primary attention
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3 pt-0">
-                {profile.weak_areas && profile.weak_areas.length > 0 ? (
-                  <div className="flex flex-col gap-2">
-                    {profile.weak_areas.map((area: string) => (
-                      <div
-                        key={area}
-                        className="flex items-center justify-between rounded-xl border border-amber-200/50 bg-amber-50/50 px-3.5 py-2.5 text-sm text-slate-700 font-semibold"
-                      >
-                        <span>{area}</span>
-                        <Badge variant="outline" className="border-amber-200 text-amber-700 bg-white text-[10px] font-bold">
-                          High Priority
-                        </Badge>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-slate-400 font-medium py-4">No weak areas identified!</p>
-                )}
-              </CardContent>
+          {/* 9: the main chart */}
+          <Panel
+            title="Band per marked attempt"
+            aside={points.length > 0 ? `Latest ${points.length} of ${graded.length}` : undefined}
+            className="t-stagger-line col-span-2 lg:col-span-9"
+          >
+            <div style={stagger(4)} className="rounded-xl bg-sheet p-4 pb-2">
+              {points.length === 0 ? (
+                <div className="flex h-[248px] flex-col items-start justify-center gap-3 px-2">
+                  <p className="max-w-[46ch] text-[15px] text-soft">
+                    Each marked essay, recording and test lands here as a point, against your target of Band{" "}
+                    {target.toFixed(1)}. Nothing is marked yet.
+                  </p>
+                  <Button asChild variant="secondary" size="sm">
+                    <Link href={`/${practise.toLowerCase()}`}>Start with {practise}</Link>
+                  </Button>
+                </div>
+              ) : (
+                <BandTrend points={points} target={target} />
+              )}
             </div>
+          </Panel>
 
-            <CardContent className="pb-6 pt-2">
-              {/* Study Plan quick links */}
-              <div className="pt-4 border-t border-stone-100">
-                <a href="/planner" className="flex items-center justify-between text-xs font-bold text-blue-950 hover:text-amber-800 transition-colors">
-                  <span className="flex items-center gap-1.5">
-                    <Compass className="h-4 w-4" />
-                    View Study Roadmap
-                  </span>
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </a>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Quick Practice Modules */}
-          <Card className="rounded-2xl border-stone-200/60 shadow-[0_8px_30px_rgb(0,0,0,0.02)] bg-white lg:col-span-2 text-left">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-lg font-bold text-blue-950">
-                <BookOpen className="h-5 w-5 text-amber-600" />
-                Start Preparing
-              </CardTitle>
-              <CardDescription className="text-slate-400 font-medium">
-                Click any of the modules below to start practicing with AI tutors
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              {["Reading", "Writing", "Listening", "Speaking"].map((module) => {
-                const path = `/${module.toLowerCase()}`;
-                const isWeakArea = profile.weak_areas?.includes(module);
-                const avgScore = stats?.averages?.[module.toLowerCase()];
-
-                // Module specific design details
-                const moduleStyles: Record<string, { bg: string, text: string, hover: string, icon: any }> = {
-                  Reading: { bg: "bg-amber-50/80", text: "text-blue-950", hover: "hover:border-amber-400/80 hover:bg-stone-50/50", icon: BookOpen },
-                  Writing: { bg: "bg-amber-50/80", text: "text-blue-950", hover: "hover:border-amber-400/80 hover:bg-stone-50/50", icon: PenTool },
-                  Listening: { bg: "bg-amber-50/80", text: "text-blue-950", hover: "hover:border-amber-400/80 hover:bg-stone-50/50", icon: Headset },
-                  Speaking: { bg: "bg-amber-50/80", text: "text-blue-950", hover: "hover:border-amber-400/80 hover:bg-stone-50/50", icon: Mic }
-                };
-
-                const style = moduleStyles[module] || moduleStyles.Reading;
-                const IconComponent = style.icon;
-
-                return (
-                  <a
-                    key={module}
-                    href={path}
-                    className={`group relative flex items-center justify-between rounded-xl border border-stone-200/60 p-4.5 transition-all duration-200 hover:-translate-y-0.5 ${style.hover} cursor-pointer shadow-xs bg-white`}
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className={`rounded-xl ${style.bg} p-2.5 ${style.text} transition-colors duration-200`}>
-                        <IconComponent className="h-5 w-5" />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-slate-800 transition-colors">
-                            {module} Prep
-                          </span>
-                          {isWeakArea && (
-                            <Badge variant="default" className="text-[10px] font-bold px-2 py-0 bg-amber-50 text-amber-700 border border-amber-100 hover:bg-amber-100">
-                              Focus
-                            </Badge>
-                          )}
-                        </div>
-                        <p className="text-xs text-slate-400 font-medium mt-1">
-                          {avgScore > 0 ? `Current avg: Band ${avgScore.toFixed(1)}` : "No attempts recorded yet"}
-                        </p>
-                      </div>
-                    </div>
-                    <ChevronRight className="h-5 w-5 text-slate-300 group-hover:text-blue-950 group-hover:translate-x-0.5 transition-all" />
-                  </a>
-                );
-              })}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Performance Track Record Section */}
-        <Card className="rounded-2xl border-stone-200/60 shadow-[0_8px_30px_rgb(0,0,0,0.02)] bg-white w-full text-left mt-8">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg font-bold text-blue-950">
-              <Award className="h-5 w-5 text-amber-600" />
-              Performance Track Record
-            </CardTitle>
-            <CardDescription className="text-slate-400 font-medium">
-              Detailed history of all practice attempts and evaluations across modules
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="pb-6">
-            {trackRecord.length > 0 ? (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-stone-50/40 text-slate-400 font-bold uppercase tracking-wider text-[10px] border-b border-stone-200/40">
-                      <th className="px-6 py-3.5 text-left">Module</th>
-                      <th className="px-6 py-3.5 text-left">Task / Title</th>
-                      <th className="px-6 py-3.5 text-left">Attempt Date</th>
-                      <th className="px-6 py-3.5 text-left">Score</th>
-                      <th className="px-6 py-3.5 text-left">Details</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-stone-100">
-                    {trackRecord.slice(0, 5).map((record) => {
-                      const moduleStyles: Record<string, { bg: string }> = {
-                        Reading: { bg: "bg-slate-100 text-slate-600 border-stone-200/60" },
-                        Writing: { bg: "bg-emerald-50 text-emerald-800 border-emerald-100/60" },
-                        Listening: { bg: "bg-slate-100 text-slate-600 border-stone-200/60" },
-                        Speaking: { bg: "bg-amber-100/60 text-amber-800 border-amber-200/40" }
-                      };
-                      const style = moduleStyles[record.module] || moduleStyles.Reading;
-
-                      return (
-                        <tr key={record.id} className="hover:bg-stone-50/20 transition-colors">
-                          <td className="px-6 py-4">
-                            <span className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${style.bg}`}>
-                              {record.module}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 font-semibold text-slate-800">
-                            {record.title}
-                          </td>
-                          <td className="px-6 py-4 text-slate-400 font-medium">
-                            {new Date(record.date).toLocaleDateString("en-US", {
-                              year: "numeric",
-                              month: "short",
-                              day: "numeric",
-                              hour: "2-digit",
-                              minute: "2-digit"
-                            })}
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="flex flex-col">
-                              <span className="font-extrabold text-slate-700">{record.score}</span>
-                              {record.rawScore && (
-                                <span className="text-[10px] text-slate-400 font-medium">
-                                  Raw: {record.rawScore}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <a 
-                              href={
-                                record.module === "Writing" ? `/writing?attempt_id=${record.id}` :
-                                record.module === "Speaking" ? `/speaking?attempt_id=${record.id}` :
-                                record.module === "Reading" ? `/reading?attempt_id=${record.id}` :
-                                `/listening?attempt_id=${record.id}`
-                              }
-                              className="text-xs font-bold text-blue-950 hover:text-amber-800 flex items-center gap-1 w-fit"
-                            >
-                              View Details
-                              <ChevronRight className="h-3 w-3" />
-                            </a>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-                {trackRecord.length > 5 && (
-                  <div className="mt-4 pt-4 border-t border-stone-100 flex justify-center">
-                    <a
-                      href="/records"
-                      className="text-xs font-extrabold text-blue-950 hover:text-amber-850 transition-colors flex items-center gap-1.5 bg-stone-50 hover:bg-stone-100 border border-stone-200/60 px-4 py-2 rounded-xl hover:scale-[1.01] transition-transform duration-150"
-                    >
-                      See All {trackRecord.length} Records
-                      <ChevronRight className="h-4 w-4" />
-                    </a>
-                  </div>
-                )}
+          {/* 3: this week's plan */}
+          <Panel
+            title="This week's plan"
+            aside={hasPlan && plan ? `Week ${plan.weekly_plans[currentWeekIndex(plan)].week} of ${plan.weekly_plans.length}` : undefined}
+            className="t-stagger-line col-span-2 flex flex-col lg:col-span-3"
+          >
+            {planFailed ? (
+              <p className="text-[15px] text-soft">Your plan didn&apos;t load. Refresh to try again.</p>
+            ) : !hasPlan || !plan ? (
+              <div className="flex flex-1 flex-col justify-between gap-4">
+                <p className="text-[15px] text-soft">
+                  No study plan yet. Build one from your target band, exam date and scores so far.
+                </p>
+                <Button asChild variant="secondary" size="sm" className="self-start">
+                  <Link href="/planner">Build my plan</Link>
+                </Button>
               </div>
             ) : (
-              <div className="text-center py-10 space-y-3">
-                <div className="text-4xl">📊</div>
-                <h4 className="font-bold text-slate-700 text-sm">No attempts recorded yet</h4>
-                <p className="text-xs text-slate-400 max-w-xs mx-auto">
-                  Start practicing reading, writing, speaking, or listening drills to track your band progression logs here.
-                </p>
-              </div>
+              (() => {
+                const week = plan.weekly_plans[currentWeekIndex(plan)];
+                const done = new Set(plan.completed_tasks ?? []);
+                const doneHere = week.tasks.filter((_, i) => done.has(taskKey(week.week, i))).length;
+                return (
+                  <div className="flex flex-1 flex-col justify-between gap-4">
+                    <div>
+                      <p className="text-[15px] font-medium text-ink">{week.focus}</p>
+                      <ul className="mt-3 flex flex-col gap-2.5">
+                        {week.tasks.map((task, i) => (
+                          <li key={i} className="flex gap-2.5 text-sm leading-snug">
+                            <PlanTick done={done.has(taskKey(week.week, i))} />
+                            <span className={done.has(taskKey(week.week, i)) ? "text-soft" : "text-ink"}>{task}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div className="flex items-baseline justify-between border-t border-border pt-3 text-sm">
+                      <span className="tabular text-soft">
+                        {doneHere} of {week.tasks.length} done
+                      </span>
+                      <Link href="/planner" className="text-ink underline decoration-1 underline-offset-4 hover:decoration-2">
+                        Open plan
+                      </Link>
+                    </div>
+                  </div>
+                );
+              })()
             )}
-          </CardContent>
-        </Card>
-      </main>
+          </Panel>
 
-      {/* Floating AI Mentor Chat FAB */}
-      <a 
-        href="/chat" 
-        className="fixed bottom-6 right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-tr from-blue-950 to-blue-900 text-white shadow-lg shadow-blue-950/20 hover:scale-105 hover:shadow-xl hover:shadow-blue-950/35 active:scale-95 transition-all duration-200 group border border-white/20"
-        aria-label="Chat with AI Mentor"
-      >
-        <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-blue-950 to-blue-900 blur-[8px] opacity-40 group-hover:opacity-60 transition-opacity animate-pulse" />
-        <div className="relative flex items-center justify-center">
-          <MessageSquare className="h-6 w-6 stroke-[2]" />
-          <Sparkles className="absolute -top-1 -right-1.5 h-3.5 w-3.5 text-amber-300 fill-amber-300 animate-pulse" />
-        </div>
-      </a>
+          {/* 6: recent results */}
+          <Panel
+            title="Recent results"
+            aside={
+              trackRecord.length > 0 ? (
+                <Link href="/records" className="text-ink underline decoration-1 underline-offset-4 hover:decoration-2">
+                  View all {trackRecord.length}
+                </Link>
+              ) : undefined
+            }
+            className="t-stagger-line col-span-2 lg:col-span-6"
+          >
+            {trackRecord.length === 0 ? (
+              <p className="text-[15px] text-soft">
+                No attempts yet. Marked essays, speaking answers and tests will be listed here, newest first.
+              </p>
+            ) : (
+              <ul className="-mx-2 flex flex-col">
+                {trackRecord.slice(0, 5).map((r) => (
+                  <RecentRow key={`${r.module}-${r.id}`} record={r} />
+                ))}
+              </ul>
+            )}
+          </Panel>
 
-      {/* Footer */}
-      <footer className="border-t border-stone-200/60 py-8 bg-stone-50 relative z-10 w-full">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center">
-            <img src="/logo.png" alt="AI IELTS Logo" className="h-20 w-auto object-contain" />
-          </div>
-          <p className="text-xs text-slate-400 font-medium">
-            &copy; {new Date().getFullYear()} IELTS Guidance Platform. All rights reserved.
-          </p>
-        </div>
-      </footer>
-    </div>
+          {/* 6: distance to target per module, and the next mock */}
+          <Panel
+            title={`Distance to Band ${target.toFixed(1)}`}
+            aside={<span className="hidden sm:inline">{weakAreas.length ? `Focus: ${weakAreas.join(", ")}` : "Lowest first"}</span>}
+            className="t-stagger-line col-span-2 flex flex-col lg:col-span-6"
+          >
+            <ul className="flex flex-col">
+              {gapRows.map((m) => {
+                const gap = m.avg != null ? target - m.avg : null;
+                const focus = weakAreas.includes(m.name);
+                return (
+                  <li key={m.key} className="grid h-11 grid-cols-[84px_1fr_96px] items-center gap-4">
+                    <span className={focus ? "text-[15px] font-medium text-ink" : "text-[15px] text-soft"}>{m.name}</span>
+                    <span className="relative h-2 rounded-full bg-panel-strong" aria-hidden>
+                      {m.avg != null && (
+                        <span
+                          className={`absolute inset-y-0 left-0 rounded-full ${focus ? "bg-ink" : "bg-[#a8a299]"}`}
+                          style={{ width: pos(m.avg) }}
+                        />
+                      )}
+                      <span className="absolute -top-1 -bottom-1 w-px bg-ink" style={{ left: pos(target) }} />
+                    </span>
+                    <span className="tabular text-right text-sm text-soft">
+                      {gap == null ? "No attempts" : gap <= 0 ? <span className="text-good">At target</span> : <><span className="text-ink">{gap.toFixed(1)}</span> to go</>}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+            <p className="mt-1 mb-5 text-[13px] text-soft">Bars run from Band {SCALE_LO} to 9; the tick is your target.</p>
+            <div className="mt-auto border-t border-border pt-4">
+              {(() => {
+                const mock = hasPlan && plan ? nextMock(plan, plan.weekly_plans[currentWeekIndex(plan)].week) : null;
+                return mock ? (
+                  <div className="flex items-end justify-between gap-4">
+                    <div>
+                      <p className="text-sm text-soft">Next mock</p>
+                      <p className="mt-1 text-[15px] text-ink">
+                        <span className="font-medium">{mockWhen(mock.date)}</span> · {mock.test_type}
+                      </p>
+                      <p className="mt-0.5 text-sm text-soft">{mock.objective}</p>
+                    </div>
+                    <Link
+                      href="/simulator"
+                      className="shrink-0 text-sm text-ink underline decoration-1 underline-offset-4 hover:decoration-2"
+                    >
+                      Open the mock
+                    </Link>
+                  </div>
+                ) : (
+                  <p className="text-sm text-soft">
+                    {hasPlan ? "No mock left on your plan." : "Mock dates come with your study plan."}
+                  </p>
+                );
+              })()}
+            </div>
+          </Panel>
+        </Reveal>
+      </PageColumn>
+    </AppShell>
   );
 }
 
+function RecentRow({ record }: { record: TrackRecordEntry }) {
+  return (
+    <li>
+      <Link
+        href={attemptHref(record)}
+        className="flex items-center justify-between gap-4 rounded-[10px] px-2 py-2.5 transition-colors duration-[var(--duration-quick)] hover:bg-panel-strong focus-visible:outline-2 focus-visible:outline-teal"
+      >
+        <span className="min-w-0">
+          <span className="block truncate text-[15px] text-ink">{record.title}</span>
+          <span className="block text-sm text-soft">
+            {record.module} · {shortDate(record.date)}
+          </span>
+        </span>
+        <span className="tabular shrink-0 text-[17px] text-ink">{formatBand(record)}</span>
+      </Link>
+    </li>
+  );
+}

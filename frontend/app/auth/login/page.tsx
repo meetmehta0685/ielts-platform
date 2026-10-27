@@ -1,38 +1,38 @@
-import { LoginForm } from "@/components/auth/login-form";
 import { Metadata } from "next";
 import { Suspense } from "react";
-import { Loader2 } from "lucide-react";
+import { LoginFooter, LoginForm } from "@/components/auth/login-form";
+import { AuthFrame } from "@/components/auth/auth-frame";
 
 export const metadata: Metadata = {
-  title: "Login - IELTS AI Platform",
-  description: "Sign in to access your IELTS exam study dashboard and practice tools.",
+  title: "Sign in · IELTS Prep",
+  description: "Sign in to your IELTS practice: marked essays, speaking feedback, timed tests and your study plan.",
 };
+
+function FormSkeleton() {
+  return (
+    <div className="flex flex-col gap-4" aria-busy="true" aria-label="Loading the sign-in form">
+      {[0, 1].map((i) => (
+        <div key={i} className="flex flex-col gap-2">
+          <div className="t-skel h-4 w-16" />
+          <div className="t-skel h-10 w-full rounded-[10px]" />
+        </div>
+      ))}
+      <div className="t-skel mt-1 h-10 w-full rounded-full" />
+    </div>
+  );
+}
 
 export default function LoginPage() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-radial from-background to-muted/20 px-4 py-12 sm:px-6 lg:px-8">
-      <div className="w-full max-w-md space-y-8">
-        <div className="flex flex-col items-center">
-          <img src="/logo.png" alt="AI IELTS Logo" className="h-36 w-auto object-contain mb-4" />
-          <h1 className="text-center text-3xl font-extrabold tracking-tight text-foreground">
-            Welcome Back
-          </h1>
-          <p className="mt-2 text-center text-sm text-muted-foreground">
-            Sign in to continue your preparation
-          </p>
-        </div>
-        
-        {/* Wrap in Suspense to resolve searchParams client-side smoothly */}
-        <Suspense
-          fallback={
-            <div className="flex justify-center py-8">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            </div>
-          }
-        >
-          <LoginForm />
-        </Suspense>
-      </div>
-    </div>
+    <AuthFrame
+      title="Sign in to keep practising"
+      lead="Your marked essays, speaking feedback and study plan are where you left them."
+      footer={<LoginFooter />}
+    >
+      {/* useSearchParams needs a Suspense boundary */}
+      <Suspense fallback={<FormSkeleton />}>
+        <LoginForm />
+      </Suspense>
+    </AuthFrame>
   );
 }

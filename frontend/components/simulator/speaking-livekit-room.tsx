@@ -1,30 +1,25 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Image from "next/image";
 import {
   LiveKitRoom,
-  ParticipantTile,
   RoomAudioRenderer,
   StartAudio,
   TrackToggle,
+  VideoTrack,
+  isTrackReference,
+  useConnectionState,
+  useIsSpeaking,
   useLocalParticipant,
   useParticipants,
   useRoomContext,
   useTracks,
 } from "@livekit/components-react";
-import { Track, type TextStreamReader } from "livekit-client";
-import {
-  CheckCircle2,
-  Loader2,
-  Mic,
-  MicOff,
-  Video,
-  VideoOff,
-  Wifi,
-  WifiOff,
-} from "lucide-react";
+import { ConnectionState, Track, type Participant, type TextStreamReader } from "livekit-client";
+import { Mic, MicOff, Video, VideoOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 type RoomDetails = {
   roomName: string;
@@ -55,7 +50,166 @@ export interface SpeakingLiveKitRoomProps {
   candidateName: string;
   onPromptChange: (prompt: string) => void;
   onTranscriptChange: (transcript: string) => void;
-  onComplete: (transcript: string) => void | Promise<void>;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Presentational pieces shared by the pre-connection and live states.
+ * --------------------------------------------------------------------------------------------- */
+
+type RoomState = "preparing" | "connecting" | "waiting" | "live" | "unavailable";
+
+const STATUS: Record<RoomState, { text: string; dot: string }> = {
+  preparing: { text: "Opening your exam room", dot: "bg-putty-deep" },
+  connecting: { text: "Connecting to the examiner", dot: "bg-putty-deep" },
+  waiting: { text: "Room open. The examiner has not joined yet", dot: "bg-putty-deep" },
+  live: { text: "Examiner connected", dot: "bg-good" },
+  unavailable: { text: "Examiner unavailable", dot: "bg-bad" },
+};
+
+function StatusLine({ state, aside }: { state: RoomState; aside?: ReactNode }) {
+  const s = STATUS[state];
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <p key={state} className="t-swap inline-flex items-center gap-2 text-[15px] text-ink" aria-live="polite">
+        <span className={cn("size-2 rounded-full", s.dot)} aria-hidden />
+        <span className={state === "preparing" || state === "connecting" ? "t-shimmer" : undefined}>{s.text}</span>
+      </p>
+      {aside}
+    </div>
+  );
+}
+
+function TileLabel({ children }: { children: ReactNode }) {
+  return (
+    <span className="absolute bottom-3 left-3 inline-flex items-center gap-2 rounded-full bg-sheet px-3 py-1 text-[13px] font-medium text-ink">
+      {children}
+    </span>
+  );
+}
+
+function ExaminerPortrait({ dim }: { dim?: boolean }) {
+  return (
+    <Image
+      src="/examiner.png"
+      alt="AI IELTS examiner"
+      fill
+      sizes="(max-width: 1024px) 90vw, 60vw"
+      className={cn("object-cover transition-opacity duration-[var(--duration-slow)]", dim && "opacity-40 grayscale")}
+    />
+  );
+}
+
+function CueCard({ prompt }: { prompt: string | null }) {
+  return (
+    <section aria-label="Cue card" className="rounded-2xl border border-[#e4e0d8] bg-sheet p-5">
+      <p className="text-[13px] text-soft">Cue card · the topic the examiner will ask about</p>
+      {prompt ? (
+        <p className="mt-2 text-[17px] leading-normal text-ink">{prompt}</p>
+      ) : (
+        <div className="mt-3 flex flex-col gap-2" aria-hidden>
+          <span className="t-skel block h-4 w-11/12" />
+          <span className="t-skel block h-4 w-8/12" />
+        </div>
+      )}
+      <p className="mt-3 text-[14px] text-soft">Answer out loud. Give reasons and examples, and keep going until the examiner moves on.</p>
+    </section>
+  );
+}
+
+function TranscriptPanel({ lines, placeholder }: { lines: TranscriptLine[]; placeholder: string }) {
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // Keep the newest line in view without scrolling the page around it.
+    const list = listRef.current;
+    if (list) list.scrollTop = list.scrollHeight;
+  }, [lines]);
+  return (
+    <section aria-label="Live transcript" className="flex min-h-[220px] flex-1 flex-col rounded-2xl bg-panel p-4">
+      <div className="mb-3 flex items-baseline justify-between">
+        <h2 className="text-[15px] font-semibold text-ink">Live transcript</h2>
+        <span className="tabular text-[13px] text-soft">
+          {lines.length} {lines.length === 1 ? "line" : "lines"}
+        </span>
+      </div>
+      <div ref={listRef} className="max-h-[320px] flex-1 overflow-y-auto pr-1" aria-live="polite">
+        {lines.length === 0 ? (
+          <p className="text-[15px] leading-normal text-soft">{placeholder}</p>
+        ) : (
+          <ol className="flex flex-col gap-3">
+            {lines.map((line) => (
+              <li key={line.id} className="t-rise">
+                <p className="text-[13px] text-soft">{line.speaker === "candidate" ? "You" : "Examiner"}</p>
+                <p className="text-[15px] leading-normal text-ink">{line.text}</p>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/** The room before LiveKit is up: same layout, honest state. */
+function RoomPlaceholder({
+  state,
+  candidateName,
+  error,
+  onRetry,
+  retrying,
+  prompt = null,
+}: {
+  state: "preparing" | "unavailable";
+  candidateName: string;
+  prompt?: string | null;
+  error?: string | null;
+  onRetry?: () => void;
+  retrying?: boolean;
+}) {
+  return (
+    <div className="mx-auto flex max-w-[1180px] flex-col gap-5 px-4 py-6 sm:px-6 lg:py-8">
+      <StatusLine state={state} />
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
+        <div className="flex flex-col gap-5 lg:col-span-8">
+          <div className="relative">
+            <div className="relative aspect-video overflow-hidden rounded-2xl bg-panel-strong">
+              <ExaminerPortrait dim />
+              {state !== "unavailable" && <TileLabel>Examiner</TileLabel>}
+            </div>
+            {state === "unavailable" && (
+              <div className="mt-4 sm:absolute sm:inset-0 sm:mt-0 sm:flex sm:items-center sm:justify-center sm:p-6">
+              <div className="t-rise max-w-[440px] rounded-2xl bg-panel p-6 sm:bg-sheet">
+                  <h2 className="text-[17px] font-semibold text-ink">The AI examiner is not available right now.</h2>
+                  <p className="mt-2 text-[15px] leading-normal text-soft">
+                    The live exam room could not stay connected. Try again, or press Finish to end the mock;
+                    Speaking will then be marked Not graded.
+                  </p>
+                  {error && <p className="mt-3 text-[13px] text-soft">Detail: {error}</p>}
+                  <Button className="mt-5" onClick={onRetry} disabled={retrying}>
+                    <span key={String(retrying)} className="t-swap">
+                      {retrying ? "Trying again…" : "Try again"}
+                    </span>
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+          <CueCard prompt={prompt} />
+        </div>
+        <div className="flex flex-col gap-5 lg:col-span-4">
+          <div className="relative flex aspect-video items-center justify-center rounded-2xl bg-panel-strong text-soft">
+            <VideoOff className="size-7" aria-hidden />
+            <TileLabel>{candidateName}</TileLabel>
+          </div>
+          {state === "preparing" && (
+            <p className="text-[14px] leading-normal text-soft">
+              Your browser will ask for the microphone and camera when the room opens.
+            </p>
+          )}
+          <TranscriptPanel lines={[]} placeholder="The transcript appears here once the interview starts." />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function SpeakingLiveKitRoom({
@@ -65,7 +219,6 @@ export default function SpeakingLiveKitRoom({
   candidateName,
   onPromptChange,
   onTranscriptChange,
-  onComplete,
 }: SpeakingLiveKitRoomProps) {
   const [details, setDetails] = useState<RoomDetails | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
@@ -122,41 +275,23 @@ export default function SpeakingLiveKitRoom({
 
   if (requestError) {
     return (
-      <div className="flex h-full min-h-[520px] items-center justify-center bg-slate-950 p-8">
-        <div className="max-w-md space-y-4 text-center text-white">
-          <WifiOff className="mx-auto h-10 w-10 text-rose-400" />
-          <h2 className="text-xl font-bold">Unable to open the AI examiner room</h2>
-          <p className="text-sm text-slate-300">{requestError}</p>
-          <p className="text-xs text-slate-500">
-            Confirm the backend is running and the LiveKit credentials are configured.
-          </p>
-          <Button
-            type="button"
-            onClick={() => {
-              setDetails(null);
-              setIsRetrying(true);
-              setRetryNonce((value) => value + 1);
-            }}
-            disabled={isRetrying}
-            className="mx-auto gap-2 bg-amber-400 font-bold text-slate-950 hover:bg-amber-300"
-          >
-            {isRetrying && <Loader2 className="h-4 w-4 animate-spin" />}
-            {isRetrying ? "Retrying…" : "Try again"}
-          </Button>
-        </div>
-      </div>
+      <RoomPlaceholder
+        state="unavailable"
+        candidateName={candidateName}
+        error={requestError}
+        prompt={details?.speakingPrompt ?? null}
+        retrying={isRetrying}
+        onRetry={() => {
+          setDetails(null);
+          setIsRetrying(true);
+          setRetryNonce((value) => value + 1);
+        }}
+      />
     );
   }
 
   if (!details) {
-    return (
-      <div className="flex h-full min-h-[520px] items-center justify-center bg-slate-950 text-white">
-        <div className="flex items-center gap-3 text-sm font-semibold text-slate-300">
-          <Loader2 className="h-5 w-5 animate-spin text-amber-400" />
-          Preparing your private AI examiner room…
-        </div>
-      </div>
-    );
+    return <RoomPlaceholder state="preparing" candidateName={candidateName} />;
   }
 
   return (
@@ -167,20 +302,30 @@ export default function SpeakingLiveKitRoom({
       audio
       video
       options={{ adaptiveStream: true, dynacast: true }}
-      className="h-full min-h-[520px] bg-slate-950"
+      className="relative"
       onError={(error) => setRequestError(error.message)}
     >
       <RoomAudioRenderer />
-      <StartAudio label="Enable examiner audio" className="absolute left-1/2 top-4 z-30 -translate-x-1/2 rounded-lg bg-amber-400 px-3 py-2 text-xs font-bold text-slate-950" />
       <LiveSpeakingStage
         agentName={details.agentName}
         agentDispatchError={details.agentDispatchError}
         candidateName={candidateName}
         prompt={details.speakingPrompt}
         onTranscriptChange={onTranscriptChange}
-        onComplete={onComplete}
       />
     </LiveKitRoom>
+  );
+}
+
+function SpeakingBars({ participant, className }: { participant: Participant; className?: string }) {
+  const speaking = useIsSpeaking(participant);
+  if (!speaking) return null;
+  return (
+    <span className={cn("x-level inline-flex items-end gap-[2px]", className)} aria-label="Speaking">
+      <span />
+      <span />
+      <span />
+    </span>
   );
 }
 
@@ -190,26 +335,23 @@ function LiveSpeakingStage({
   candidateName,
   prompt,
   onTranscriptChange,
-  onComplete,
 }: {
   agentName: string;
   agentDispatchError?: string | null;
   candidateName: string;
   prompt: string;
   onTranscriptChange: (transcript: string) => void;
-  onComplete: (transcript: string) => void | Promise<void>;
 }) {
   const room = useRoomContext();
+  const connection = useConnectionState();
   const participants = useParticipants();
-  const { isMicrophoneEnabled, isCameraEnabled } = useLocalParticipant();
+  const { isMicrophoneEnabled, isCameraEnabled, localParticipant } = useLocalParticipant();
   const cameraTracks = useTracks(
     [{ source: Track.Source.Camera, withPlaceholder: true }],
     { onlySubscribed: false },
   );
   const [lines, setLines] = useState<TranscriptLine[]>([]);
-  const [isFinishing, setIsFinishing] = useState(false);
 
-  const localParticipant = participants.find((participant) => participant.isLocal);
   const examinerParticipant = participants.find((participant) => !participant.isLocal);
   const candidateTrack = cameraTracks.find((reference) => reference.participant.isLocal);
   const examinerTrack = cameraTracks.find((reference) => !reference.participant.isLocal);
@@ -256,136 +398,107 @@ function LiveSpeakingStage({
     onTranscriptChange(candidateTranscript);
   }, [candidateTranscript, onTranscriptChange]);
 
-  const finishExam = async () => {
-    if (isFinishing) return;
-    setIsFinishing(true);
-    try {
-      await onComplete(candidateTranscript);
-    } finally {
-      setIsFinishing(false);
-    }
-  };
-
-  const statusText = examinerParticipant
-    ? "AI examiner connected"
-    : agentDispatchError
-      ? "Waiting for AI examiner service"
-      : "Connecting to AI examiner";
+  const state: RoomState = examinerParticipant
+    ? "live"
+    : connection === ConnectionState.Connected
+      ? agentDispatchError
+        ? "waiting"
+        : "connecting"
+      : connection === ConnectionState.Disconnected
+        ? "unavailable"
+        : "connecting";
 
   return (
-    <div className="flex h-full min-h-[520px] flex-col bg-slate-950 text-white lg:flex-row">
-      <div className="flex min-h-[360px] flex-1 flex-col border-b border-slate-800 p-5 lg:border-b-0 lg:border-r">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 rounded-lg border border-slate-700/70 bg-slate-900/80 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider">
-            <span className={`h-2 w-2 rounded-full ${examinerParticipant ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`} />
-            {statusText}
-          </div>
-          <div className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-400">
-            <Wifi className="h-3.5 w-3.5" />
-            Private exam room
-          </div>
-        </div>
+    <div className="mx-auto flex max-w-[1180px] flex-col gap-5 px-4 py-6 sm:px-6 lg:py-8">
+      <StatusLine
+        state={state}
+        aside={
+          <StartAudio
+            label="Turn on examiner audio"
+            className="inline-flex h-10 items-center rounded-full bg-ink px-5 text-[15px] font-medium text-white transition-colors duration-[var(--duration-quick)] hover:bg-[#2a2926]"
+          />
+        }
+      />
 
-        <div className="relative flex flex-1 items-center justify-center py-6">
-          <div className="relative aspect-video w-full max-w-2xl overflow-hidden rounded-2xl border-4 border-slate-800 bg-slate-900 shadow-2xl">
-            {examinerTrack ? (
-              <ParticipantTile trackRef={examinerTrack} className="h-full w-full [&_video]:h-full [&_video]:w-full [&_video]:object-cover" />
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
+        <div className="flex flex-col gap-5 lg:col-span-8">
+          <div className="relative aspect-video overflow-hidden rounded-2xl bg-panel-strong">
+            {examinerTrack && isTrackReference(examinerTrack) ? (
+              <VideoTrack trackRef={examinerTrack} className="h-full w-full object-cover" />
             ) : (
-              <Image
-                src="/examiner.png"
-                alt="AI IELTS examiner"
-                fill
-                sizes="(max-width: 1024px) 90vw, 60vw"
-                className="object-cover"
-              />
+              <ExaminerPortrait dim={state !== "live"} />
             )}
-            <div className="absolute bottom-2 left-2 rounded-md bg-black/65 px-2.5 py-1 text-[10px] font-semibold text-white">
-              {agentName} · AI examiner
-            </div>
-            {examinerParticipant && (
-              <div className="absolute right-2 top-2 rounded bg-emerald-500 px-2 py-1 text-[9px] font-bold uppercase tracking-widest text-white">
+            <TileLabel>
+              {agentName} · examiner
+              {examinerParticipant && <SpeakingBars participant={examinerParticipant} className="text-teal" />}
+            </TileLabel>
+            {state === "live" && (
+              <span className="absolute top-3 right-3 inline-flex items-center gap-1.5 rounded-full bg-sheet px-3 py-1 text-[13px] font-medium text-ink">
+                <span className="size-1.5 rounded-full bg-good" aria-hidden />
                 Live
+              </span>
+            )}
+            {state === "waiting" && (
+              <div className="absolute inset-x-3 top-3 rounded-xl bg-sheet px-4 py-3 text-[14px] leading-normal text-soft sm:right-auto sm:max-w-[420px]">
+                The room is open but the AI examiner service has not joined. It needs the agent process running.
+                You can wait, or press Finish; Speaking will then be marked Not graded.
               </div>
             )}
           </div>
-
-          <div className="absolute bottom-0 left-1/2 w-[min(90%,38rem)] -translate-x-1/2 rounded-xl border border-slate-700 bg-black/75 p-4 text-center backdrop-blur">
-            <p className="mb-1 text-[9px] font-bold uppercase tracking-widest text-amber-300">Examiner prompt</p>
-            <p className="text-sm leading-relaxed text-slate-100">“{prompt}”</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex w-full flex-col gap-4 overflow-y-auto bg-slate-900/60 p-5 lg:w-[430px] xl:w-[500px]">
-        <div className="relative aspect-video overflow-hidden rounded-xl border border-slate-700 bg-slate-950">
-          {candidateTrack ? (
-            <ParticipantTile trackRef={candidateTrack} className="h-full w-full [&_video]:h-full [&_video]:w-full [&_video]:object-cover" />
-          ) : (
-            <div className="flex h-full items-center justify-center text-slate-600">
-              <VideoOff className="h-10 w-10" />
-            </div>
-          )}
-          <div className="absolute bottom-2 left-2 rounded bg-black/70 px-2 py-1 text-[10px] font-semibold text-white">
-            {candidateName}
-          </div>
-          <div className="absolute right-2 top-2 flex items-center gap-1 rounded bg-black/70 px-2 py-1 text-[9px] font-bold uppercase tracking-wider">
-            {isCameraEnabled ? <Video className="h-3 w-3 text-emerald-400" /> : <VideoOff className="h-3 w-3 text-rose-400" />}
-            Camera
-          </div>
+          <CueCard prompt={prompt} />
         </div>
 
-        <div className="flex items-center justify-center gap-2">
-          <TrackToggle
-            source={Track.Source.Microphone}
-            showIcon={false}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 text-xs font-bold text-white hover:bg-slate-700"
-          >
-            {isMicrophoneEnabled ? <Mic className="h-3.5 w-3.5 text-emerald-400" /> : <MicOff className="h-3.5 w-3.5 text-rose-400" />}
-            {isMicrophoneEnabled ? "Mute" : "Unmute"}
-          </TrackToggle>
-          <TrackToggle
-            source={Track.Source.Camera}
-            showIcon={false}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 text-xs font-bold text-white hover:bg-slate-700"
-          >
-            {isCameraEnabled ? <Video className="h-3.5 w-3.5 text-emerald-400" /> : <VideoOff className="h-3.5 w-3.5 text-rose-400" />}
-            {isCameraEnabled ? "Camera on" : "Camera off"}
-          </TrackToggle>
-        </div>
-
-        <div className="min-h-[160px] flex-1 rounded-xl border border-slate-700 bg-slate-950/70 p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Live transcript</span>
-            <span className="text-[10px] font-mono text-slate-500">{lines.length} segments</span>
-          </div>
-          <div className="max-h-[230px] space-y-2 overflow-y-auto pr-1 text-xs leading-relaxed">
-            {lines.length === 0 ? (
-              <p className="text-slate-500">The examiner will greet you shortly. Speak naturally when asked.</p>
+        <div className="flex flex-col gap-5 lg:col-span-4">
+          <div className="relative aspect-video overflow-hidden rounded-2xl bg-panel-strong">
+            {candidateTrack && isTrackReference(candidateTrack) && isCameraEnabled ? (
+              <VideoTrack trackRef={candidateTrack} className="h-full w-full -scale-x-100 object-cover" />
             ) : (
-              lines.map((line) => (
-                <p key={line.id} className={line.speaker === "candidate" ? "text-slate-100" : "text-amber-200"}>
-                  <span className="mr-1 font-bold">{line.speaker === "candidate" ? "You:" : "Examiner:"}</span>
-                  {line.text}
-                </p>
-              ))
+              <div className="flex h-full items-center justify-center text-soft">
+                <VideoOff className="size-7" aria-hidden />
+              </div>
             )}
+            <TileLabel>
+              {candidateName}
+              <SpeakingBars participant={localParticipant} className="text-teal" />
+            </TileLabel>
           </div>
+
+          <div className="flex flex-col gap-2">
+            <TrackToggle
+              source={Track.Source.Microphone}
+              showIcon={false}
+              className={cn(
+                "inline-flex h-12 w-full items-center justify-center gap-2 rounded-full text-[15px] font-medium transition-[background-color,color,transform] duration-[var(--duration-quick)] active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal",
+                isMicrophoneEnabled ? "bg-ink text-white hover:bg-[#2a2926]" : "bg-bad-tint text-bad hover:bg-[#f2d6d3]"
+              )}
+            >
+              {isMicrophoneEnabled ? <Mic className="size-4" /> : <MicOff className="size-4" />}
+              <span key={String(isMicrophoneEnabled)} className="t-swap">
+                {isMicrophoneEnabled ? "Microphone on · tap to mute" : "Microphone off · tap to unmute"}
+              </span>
+            </TrackToggle>
+            {!isMicrophoneEnabled && (
+              <p className="t-rise text-[14px] text-bad">The examiner cannot hear you while the microphone is off.</p>
+            )}
+            <TrackToggle
+              source={Track.Source.Camera}
+              showIcon={false}
+              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-panel-strong text-[15px] font-medium text-ink transition-[background-color,transform] duration-[var(--duration-quick)] hover:bg-[#e2ded6] active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal"
+            >
+              {isCameraEnabled ? <Video className="size-4" /> : <VideoOff className="size-4" />}
+              {isCameraEnabled ? "Camera on" : "Camera off"}
+            </TrackToggle>
+          </div>
+
+          <TranscriptPanel
+            lines={lines}
+            placeholder={
+              state === "live"
+                ? "The examiner will greet you and start with Part 1. Speak naturally; your words appear here."
+                : "The transcript starts when the examiner joins."
+            }
+          />
         </div>
-
-        {agentDispatchError && !examinerParticipant && (
-          <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-[10px] leading-relaxed text-amber-200">
-            The room is open, but the AI agent has not joined yet. Start the agent service and reconnect this stage if it remains here.
-          </p>
-        )}
-
-        <Button
-          onClick={finishExam}
-          disabled={isFinishing || !localParticipant}
-          className="h-11 w-full gap-2 bg-amber-400 font-bold text-slate-950 hover:bg-amber-300"
-        >
-          {isFinishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-          {isFinishing ? "Finalizing speaking…" : "Complete Speaking Test"}
-        </Button>
       </div>
     </div>
   );

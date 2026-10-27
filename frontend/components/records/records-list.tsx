@@ -1,55 +1,59 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { 
-  ChevronRight, 
-  ChevronLeft,
-  BookOpen, 
-  Mic, 
-  PenTool, 
-  Headset, 
-  Award,
-  Search,
-  ArrowLeft,
-  Calendar,
-  Filter,
-  SlidersHorizontal
-} from "lucide-react";
+import Link from "next/link";
+import { useMemo, useState } from "react";
+import { ArrowDown, ArrowUp, Search } from "lucide-react";
+import { AppShell, PageColumn } from "@/components/app/app-shell";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import type { TrackRecordEntry } from "@/lib/track-record";
+import { cn } from "@/lib/utils";
+import { attemptHref, bandOf, formatBand } from "./record-utils";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 
 interface RecordsListProps {
   initialRecords: TrackRecordEntry[];
 }
 
+/** IELTS order: Listening, Reading, Writing, Speaking. */
+const MODULES = ["Listening", "Reading", "Writing", "Speaking"] as const;
+type Filter = "All" | (typeof MODULES)[number];
+type Sort = "newest" | "oldest" | "highest" | "lowest";
+
+const SORTS: { value: Sort; label: string }[] = [
+  { value: "newest", label: "Newest first" },
+  { value: "oldest", label: "Oldest first" },
+  { value: "highest", label: "Highest band" },
+  { value: "lowest", label: "Lowest band" },
+];
+
+const dayMonth = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+const fullDate = (iso: string) =>
+  new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+
 export function RecordsList({ initialRecords }: RecordsListProps) {
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedModule, setSelectedModule] = useState<string>("All");
-  const [sortBy, setSortBy] = useState<string>("newest");
+  const [selectedModule, setSelectedModule] = useState<Filter>("All");
+  const [sortBy, setSortBy] = useState<Sort>("newest");
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 8;
 
-  // Calculate averages dynamically for each module
-  const averages = useMemo(() => {
-    const modules = ["Reading", "Writing", "Listening", "Speaking"];
-    const result: Record<string, string | null> = {};
-
-    modules.forEach(mod => {
-      const attempts = initialRecords.filter(r => r.module === mod && r.score.startsWith("Band "));
-      if (attempts.length === 0) {
-        result[mod] = null;
-        return;
-      }
-      const sum = attempts.reduce((acc, r) => {
-        const val = parseFloat(r.score.replace("Band ", ""));
-        return acc + (isNaN(val) ? 0 : val);
-      }, 0);
-      result[mod] = (sum / attempts.length).toFixed(1);
+  // Per module: latest band, first band, average, and how many marked attempts.
+  const moduleSummary = useMemo(() => {
+    return MODULES.map((mod) => {
+      const attempts = initialRecords
+        .filter((r) => r.module === mod && bandOf(r) != null)
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      if (attempts.length === 0) return { mod, count: 0, latest: null, first: null, avg: null };
+      const bands = attempts.map((r) => bandOf(r) ?? 0);
+      return {
+        mod,
+        count: attempts.length,
+        latest: bands[bands.length - 1],
+        first: bands[0],
+        avg: bands.reduce((a, b) => a + b, 0) / bands.length,
+      };
     });
-
-    return result;
   }, [initialRecords]);
 
   // Filter, search, and sort records in memory
@@ -58,13 +62,13 @@ export function RecordsList({ initialRecords }: RecordsListProps) {
 
     // 1. Filter by Module
     if (selectedModule !== "All") {
-      list = list.filter(r => r.module === selectedModule);
+      list = list.filter((r) => r.module === selectedModule);
     }
 
     // 2. Search by Title
     if (searchQuery.trim() !== "") {
       const query = searchQuery.toLowerCase();
-      list = list.filter(r => r.title.toLowerCase().includes(query) || r.module.toLowerCase().includes(query));
+      list = list.filter((r) => r.title.toLowerCase().includes(query) || r.module.toLowerCase().includes(query));
     }
 
     // 3. Sort
@@ -76,15 +80,8 @@ export function RecordsList({ initialRecords }: RecordsListProps) {
         return new Date(a.date).getTime() - new Date(b.date).getTime();
       }
       if (sortBy === "highest" || sortBy === "lowest") {
-        const getVal = (scoreStr: string) => {
-          if (scoreStr.startsWith("Band ")) {
-            const val = parseFloat(scoreStr.replace("Band ", ""));
-            return isNaN(val) ? 0 : val;
-          }
-          return 0; // "Not graded" gets 0
-        };
-        const valA = getVal(a.score);
-        const valB = getVal(b.score);
+        const valA = bandOf(a) ?? 0; // "Not graded" sorts as 0
+        const valB = bandOf(b) ?? 0;
         return sortBy === "highest" ? valB - valA : valA - valB;
       }
       return 0;
@@ -100,7 +97,7 @@ export function RecordsList({ initialRecords }: RecordsListProps) {
     return processedRecords.slice(startIndex, startIndex + itemsPerPage);
   }, [processedRecords, currentPage]);
 
-  const handleModuleChange = (module: string) => {
+  const handleModuleChange = (module: Filter) => {
     setSelectedModule(module);
     setCurrentPage(1);
   };
@@ -111,259 +108,227 @@ export function RecordsList({ initialRecords }: RecordsListProps) {
   };
 
   const handleSortChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setSortBy(e.target.value);
+    setSortBy(e.target.value as Sort);
     setCurrentPage(1);
   };
 
-  // Module configuration for design
-  const moduleConfig: Record<string, { bg: string, text: string, icon: any, border: string }> = {
-    Reading: { bg: "bg-amber-50 text-blue-950", text: "text-amber-800", icon: BookOpen, border: "border-stone-200" },
-    Writing: { bg: "bg-emerald-50 text-emerald-800", text: "text-emerald-800", icon: PenTool, border: "border-emerald-100" },
-    Listening: { bg: "bg-blue-50 text-blue-950", text: "text-blue-800", icon: Headset, border: "border-blue-100" },
-    Speaking: { bg: "bg-amber-50 text-amber-900", text: "text-amber-800", icon: Mic, border: "border-amber-100/60" }
+  const clearFilters = () => {
+    setSearchQuery("");
+    setSelectedModule("All");
+    setCurrentPage(1);
   };
 
+  const marked = initialRecords.filter((r) => bandOf(r) != null);
+  const earliest = marked.length ? marked[marked.length - 1].date : null;
+  const title =
+    initialRecords.length === 0
+      ? "No results yet."
+      : marked.length === 0
+        ? `${initialRecords.length} ${initialRecords.length === 1 ? "attempt" : "attempts"}, none marked yet.`
+        : `${marked.length} marked ${marked.length === 1 ? "attempt" : "attempts"} since ${dayMonth(earliest!).replace(" ", "\u00a0")}.`;
+
+  const start = processedRecords.length === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1;
+  const end = Math.min(currentPage * itemsPerPage, processedRecords.length);
+  const bandSorted = sortBy === "highest" || sortBy === "lowest";
+  const SortGlyph = sortBy === "newest" || sortBy === "highest" ? ArrowDown : ArrowUp;
+
   return (
-    <div className="min-h-screen bg-stone-50 text-slate-800 font-sans relative overflow-hidden flex flex-col justify-between">
-      {/* Background Grid Pattern (matching landing/dashboard page) */}
-      <div className="absolute inset-0 bg-[radial-gradient(#efebe4_1.5px,transparent_1.5px)] [background-size:24px_24px] opacity-60 pointer-events-none" />
+    <AppShell title="Results">
+      <PageColumn
+        title={title}
+        lead={
+          initialRecords.length === 0
+            ? "Every marked essay, speaking answer and test you finish is listed here with its band."
+            : "Latest band per module, and every attempt behind it."
+        }
+        actions={
+          initialRecords.length === 0 ? (
+            <Button asChild variant="accent">
+              <Link href="/writing">Start a practice</Link>
+            </Button>
+          ) : undefined
+        }
+      >
+        {initialRecords.length > 0 && (
+          <>
+            {/* Latest band per module: one panel split by hairlines */}
+            <section
+              aria-label="Latest band per module"
+              className="grid grid-cols-2 overflow-hidden rounded-2xl bg-panel lg:grid-cols-4"
+            >
+              {moduleSummary.map((m, i) => (
+                <div
+                  key={m.mod}
+                  className={cn(
+                    "flex flex-col gap-2 p-4 sm:p-5",
+                    i % 2 === 1 && "border-l border-border",
+                    i >= 2 && "border-t border-border lg:border-t-0",
+                    i === 2 && "lg:border-l"
+                  )}
+                >
+                  <span className="text-[15px] font-medium text-ink">{m.mod}</span>
+                  <span className="tabular text-[30px] leading-none text-ink">
+                    {m.latest != null ? m.latest.toFixed(1) : "—"}
+                  </span>
+                  <span className="text-sm text-soft">
+                    {m.count === 0
+                      ? "No attempts yet"
+                      : m.count === 1
+                        ? "1 marked attempt"
+                        : `From ${m.first!.toFixed(1)} · average ${m.avg!.toFixed(1)}`}
+                  </span>
+                </div>
+              ))}
+            </section>
 
-      {/* Top ambient lights */}
-      <div className="absolute top-[-10%] left-[-10%] w-[350px] h-[350px] rounded-full bg-blue-950/5 blur-[100px] pointer-events-none" />
-      <div className="absolute top-[30%] right-[-10%] w-[450px] h-[450px] rounded-full bg-amber-500/5 blur-[130px] pointer-events-none" />
-
-      {/* Top Header */}
-      <header className="sticky top-0 z-50 border-b border-stone-200/60 bg-white/85 backdrop-blur-md">
-        <div className="mx-auto flex max-w-7xl h-16 items-center justify-between px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center gap-3">
-            <a href="/dashboard">
-              <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500 hover:text-blue-950 hover:bg-stone-100 rounded-lg">
-                <ArrowLeft className="h-4 w-4" />
-              </Button>
-            </a>
-            <span className="font-extrabold text-blue-950 tracking-tight text-lg sm:text-xl">Your Practice Records</span>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <a href="/dashboard" className="text-xs font-bold text-slate-500 hover:text-blue-950">
-              Dashboard
-            </a>
-            <span className="text-slate-300">|</span>
-            <a href="/simulator" className="text-xs font-bold text-amber-800 hover:text-blue-950">
-              Exam Simulator
-            </a>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Container */}
-      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 space-y-8 flex-1 relative z-10 w-full">
-        
-        {/* Dynamic Averages Dashboard Widgets */}
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-          {["Reading", "Writing", "Listening", "Speaking"].map((mod) => {
-            const config = moduleConfig[mod];
-            const Icon = config.icon;
-            const avg = averages[mod];
-
-            return (
-              <Card 
-                key={mod} 
-                className="rounded-2xl border-stone-200/60 shadow-[0_4px_20px_rgb(0,0,0,0.01)] bg-white hover:scale-[1.01] transition-transform duration-200 overflow-hidden"
-              >
-                <CardHeader className="flex flex-row items-center justify-between pb-1 space-y-0 p-4">
-                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">{mod}</span>
-                  <div className={`p-1.5 rounded-lg ${config.bg} ${config.text}`}>
-                    <Icon className="h-4 w-4" />
-                  </div>
-                </CardHeader>
-                <CardContent className="p-4 pt-0 text-left">
-                  <div className="text-2xl font-black text-slate-800">
-                    {avg ? `Band ${avg}` : "N/A"}
-                  </div>
-                  <p className="text-[10px] text-slate-400 font-semibold mt-1">Average score</p>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
-
-        {/* Filters and Controls container */}
-        <div className="bg-white border border-stone-200/60 rounded-2xl p-4 sm:p-6 shadow-[0_8px_30px_rgb(0,0,0,0.01)] space-y-4">
-          
-          <div className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center">
-            
-            {/* Search Input */}
-            <div className="relative w-full md:w-80">
-              <span className="absolute inset-y-0 left-3 flex items-center pointer-events-none text-slate-400">
-                <Search className="h-4 w-4" />
-              </span>
-              <input
-                type="text"
-                placeholder="Search test records..."
-                value={searchQuery}
-                onChange={handleSearchChange}
-                className="w-full pl-9 pr-4 py-2 text-sm bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:border-stone-400 focus:ring-1 focus:ring-stone-400/50 transition-all font-medium placeholder-slate-400"
+            {/* Toolbar */}
+            <div className="mt-10 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <SegmentedControl
+                label="Filter by module"
+                value={selectedModule}
+                onChange={handleModuleChange}
+                options={[{ value: "All", label: "All" }, ...MODULES.map((m) => ({ value: m, label: m }))]}
               />
+              <div className="flex gap-2">
+                <label className="relative min-w-0 flex-1 lg:w-64 lg:flex-none">
+                  <span className="sr-only">Search results</span>
+                  <Search aria-hidden className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-soft" />
+                  <Input
+                    type="search"
+                    placeholder="Search by task or test"
+                    value={searchQuery}
+                    onChange={handleSearchChange}
+                    className="pl-9"
+                  />
+                </label>
+                <label className="shrink-0">
+                  <span className="sr-only">Sort</span>
+                  <select
+                    value={sortBy}
+                    onChange={handleSortChange}
+                    className="h-10 cursor-pointer rounded-[10px] border border-input bg-sheet px-3 text-[15px] text-ink transition-[border-color] duration-[var(--duration-quick)] outline-none hover:border-[#c9c4bb] focus-visible:border-teal"
+                  >
+                    {SORTS.map((s) => (
+                      <option key={s.value} value={s.value}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
             </div>
 
-            {/* Sort Dropdown */}
-            <div className="flex items-center gap-2 w-full md:w-auto shrink-0">
-              <SlidersHorizontal className="h-4 w-4 text-slate-400 shrink-0" />
-              <select
-                value={sortBy}
-                onChange={handleSortChange}
-                className="w-full md:w-44 px-3 py-2 text-sm bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:border-stone-400 transition-all font-semibold text-slate-600 cursor-pointer"
-              >
-                <option value="newest">Newest First</option>
-                <option value="oldest">Oldest First</option>
-                <option value="highest">Highest Score</option>
-                <option value="lowest">Lowest Score</option>
-              </select>
-            </div>
-          </div>
+            <p className="mt-6 text-sm text-soft" aria-live="polite">
+              {processedRecords.length === initialRecords.length
+                ? `${initialRecords.length} ${initialRecords.length === 1 ? "attempt" : "attempts"}`
+                : `${processedRecords.length} of ${initialRecords.length} attempts`}
+            </p>
 
-          {/* Module Filtering Tabs */}
-          <div className="flex flex-wrap gap-1.5 border-t border-stone-100 pt-4">
-            {["All", "Reading", "Writing", "Listening", "Speaking"].map((mod) => (
-              <button
-                key={mod}
-                onClick={() => handleModuleChange(mod)}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                  selectedModule === mod 
-                    ? "bg-blue-950 text-white shadow-xs" 
-                    : "bg-stone-50 text-slate-500 hover:bg-stone-100 hover:text-slate-700 border border-stone-200/50"
-                }`}
-              >
-                {mod}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Records Table / Visual List */}
-        <Card className="rounded-2xl border-stone-200/60 shadow-[0_8px_30px_rgb(0,0,0,0.02)] bg-white w-full overflow-hidden text-left">
-          <CardContent className="p-0">
-            {paginatedRecords.length > 0 ? (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-stone-50/40 text-slate-400 font-bold uppercase tracking-wider text-[10px] border-b border-stone-200/40">
-                      <th className="px-6 py-4 text-left">Module</th>
-                      <th className="px-6 py-4 text-left">Task / Title</th>
-                      <th className="px-6 py-4 text-left">Attempt Date</th>
-                      <th className="px-6 py-4 text-left">Score</th>
-                      <th className="px-6 py-4 text-left">Details</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-stone-100">
-                    {paginatedRecords.map((record) => {
-                      const config = moduleConfig[record.module] || moduleConfig.Reading;
-
-                      return (
-                        <tr key={record.id} className="hover:bg-stone-50/25 transition-colors">
-                          <td className="px-6 py-4">
-                            <span className={`px-2.5 py-1 rounded-lg text-xs font-extrabold border ${config.bg} ${config.text} ${config.border}`}>
-                              {record.module}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 font-bold text-slate-800">
-                            {record.title}
-                          </td>
-                          <td className="px-6 py-4 text-slate-400 font-semibold text-xs">
-                            {new Date(record.date).toLocaleDateString("en-US", {
-                              year: "numeric",
-                              month: "short",
-                              day: "numeric",
-                              hour: "2-digit",
-                              minute: "2-digit"
-                            })}
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="flex flex-col">
-                              <span className="font-extrabold text-slate-700">{record.score}</span>
-                              {record.rawScore && (
-                                <span className="text-[10px] text-slate-400 font-semibold mt-0.5">
-                                  Raw: {record.rawScore}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <a 
-                              href={
-                                record.module === "Writing" ? `/writing?attempt_id=${record.id}` :
-                                record.module === "Speaking" ? `/speaking?attempt_id=${record.id}` :
-                                record.module === "Reading" ? `/reading?attempt_id=${record.id}` :
-                                `/listening?attempt_id=${record.id}`
-                              }
-                              className="text-xs font-extrabold text-blue-950 hover:text-amber-800 flex items-center gap-0.5 group w-fit"
-                            >
-                              View details
-                              <ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
-                            </a>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+            {processedRecords.length === 0 ? (
+              <div className="mt-3 flex flex-col items-start gap-3 rounded-2xl bg-panel p-6">
+                <p className="text-[15px] text-ink">
+                  No {selectedModule === "All" ? "" : `${selectedModule} `}results
+                  {searchQuery.trim() ? <> match &ldquo;{searchQuery.trim()}&rdquo;</> : " yet"}.
+                </p>
+                <Button variant="secondary" size="sm" onClick={clearFilters}>
+                  Clear filters
+                </Button>
               </div>
             ) : (
-              <div className="text-center py-16 space-y-4">
-                <div className="text-5xl">🔍</div>
-                <h4 className="font-extrabold text-slate-700">No records found</h4>
-                <p className="text-xs text-slate-400 max-w-xs mx-auto font-medium">
-                  Try adjusting your search criteria, selecting a different module tab, or start a new practice test!
-                </p>
+              <>
+                {/* Desktop and tablet: a real table */}
+                <table className="mt-2 hidden w-full border-collapse text-[15px] md:table">
+                  <thead>
+                    <tr className="border-b border-[#ddd8d0] text-left text-sm text-soft">
+                      <th scope="col" className="h-10 w-[120px] pr-4 font-normal">
+                        <span className="inline-flex items-center gap-1">
+                          Date
+                          {!bandSorted && <SortGlyph aria-hidden className="size-3.5" />}
+                        </span>
+                      </th>
+                      <th scope="col" className="h-10 w-[120px] pr-4 font-normal">Module</th>
+                      <th scope="col" className="h-10 pr-4 font-normal">Task</th>
+                      <th scope="col" className="h-10 w-[110px] pr-4 text-right font-normal">Raw score</th>
+                      <th scope="col" className="h-10 w-[80px] text-right font-normal">
+                        <span className="inline-flex items-center gap-1">
+                          {bandSorted && <SortGlyph aria-hidden className="size-3.5" />}
+                          Band
+                        </span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paginatedRecords.map((record) => (
+                      <tr
+                        key={`${record.module}-${record.id}`}
+                        className="group border-b border-border transition-colors duration-[var(--duration-quick)] hover:bg-panel"
+                      >
+                        <td className="tabular h-12 pr-4 text-soft">{fullDate(record.date)}</td>
+                        <td className="h-12 pr-4 text-soft">{record.module}</td>
+                        <td className="h-12 pr-4">
+                          <Link
+                            href={attemptHref(record)}
+                            className="text-ink underline-offset-4 group-hover:underline focus-visible:underline focus-visible:outline-none"
+                          >
+                            {record.title}
+                          </Link>
+                        </td>
+                        <td className="tabular h-12 pr-4 text-right text-soft">{record.rawScore ?? "—"}</td>
+                        <td className="tabular h-12 text-right text-[17px] text-ink">{formatBand(record)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                {/* Phone: two-line rows, the band on the right edge */}
+                <ul className="mt-2 border-t border-border md:hidden">
+                  {paginatedRecords.map((record) => (
+                    <li key={`${record.module}-${record.id}`} className="border-b border-border">
+                      <Link href={attemptHref(record)} className="flex min-h-[60px] items-center justify-between gap-4 py-2.5 active:bg-panel">
+                        <span className="min-w-0">
+                          <span className="block truncate text-[15px] text-ink">{record.title}</span>
+                          <span className="block text-sm text-soft">
+                            {record.module} · {fullDate(record.date)}
+                            {record.rawScore ? ` · ${record.rawScore}` : ""}
+                          </span>
+                        </span>
+                        <span className="tabular shrink-0 text-[17px] text-ink">{formatBand(record)}</span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+
+            {/* Paging, with the range stated */}
+            {totalPages > 1 && (
+              <div className="mt-4 flex items-center justify-between">
+                <span className="tabular text-sm text-soft">
+                  {start}–{end} of {processedRecords.length}
+                </span>
+                <div className="flex gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                    disabled={currentPage === 1}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                    disabled={currentPage === totalPages}
+                  >
+                    Next
+                  </Button>
+                </div>
               </div>
             )}
-          </CardContent>
-
-          {/* Table Footer with Pagination Controls */}
-          {totalPages > 1 && (
-            <div className="border-t border-stone-100 px-6 py-4 flex items-center justify-between bg-stone-50/30">
-              <span className="text-xs text-slate-400 font-bold">
-                Page {currentPage} of {totalPages} ({processedRecords.length} records total)
-              </span>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                  disabled={currentPage === 1}
-                  className="h-8 border-stone-200 text-slate-600 rounded-lg hover:bg-stone-100 flex items-center gap-1 cursor-pointer"
-                >
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                  Prev
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                  disabled={currentPage === totalPages}
-                  className="h-8 border-stone-200 text-slate-600 rounded-lg hover:bg-stone-100 flex items-center gap-1 cursor-pointer"
-                >
-                  Next
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            </div>
-          )}
-        </Card>
-      </main>
-
-      {/* Footer */}
-      <footer className="border-t border-stone-200/60 py-8 bg-stone-50 relative z-10 w-full mt-12">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center">
-            <img src="/logo.png" alt="AI IELTS Logo" className="h-20 w-auto object-contain" />
-          </div>
-          <p className="text-xs text-slate-400 font-medium">
-            &copy; {new Date().getFullYear()} IELTS Guidance Platform. All rights reserved.
-          </p>
-        </div>
-      </footer>
-    </div>
+          </>
+        )}
+      </PageColumn>
+    </AppShell>
   );
 }

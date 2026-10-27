@@ -1,23 +1,32 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense } from "react";
 import { toast } from "sonner";
-import { Loader2, ArrowLeft, CheckCircle, Clock, AlertCircle, RefreshCw } from "lucide-react";
+import { AppShell, PageColumn, Panel } from "@/components/app/app-shell";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import {
+  ExamFrame,
+  SplitPane,
+  candidateNameFrom,
+  formatClock,
+  passageSize,
+  stripPassagePrefix,
+  type TextScale,
+} from "@/components/exam/exam-frame";
+import {
+  QuestionGroups,
+  QuestionNavigator,
+  questionTypeLabel,
+  type ExamQuestion,
+} from "@/components/exam/question-field";
+import { ObjectiveResults, ResultActions, type ObjectiveResult } from "@/components/exam/exam-results";
+import { ExamError, ExamLoading, FactRow } from "@/components/exam/exam-states";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-interface Question {
-  id: number;
-  type: "multiple-choice" | "true-false-not-given" | "fill-gap";
-  questionText: string;
-  options?: string[];
-}
+type Question = ExamQuestion;
 
 interface Passage {
   id: number;
@@ -33,19 +42,7 @@ interface ReadingTest {
   passages: Passage[];
 }
 
-interface GradingDetail {
-  correct: boolean;
-  correctAnswer: string;
-  submittedAnswer: string;
-}
-
-interface ResultData {
-  score: number;
-  total_questions: number;
-  band_score: number;
-  details: Record<number, GradingDetail>;
-  explanations: Record<number, string>;
-}
+type ResultData = ObjectiveResult;
 
 function ReadingPageContent() {
   const router = useRouter();
@@ -55,15 +52,20 @@ function ReadingPageContent() {
 
   // Candidate Details
   const [candidateName, setCandidateName] = useState("Candidate");
-  const [candidateId, setCandidateId] = useState("ielts-candidate");
 
   // CBT Configuration States
   const [isTimerHidden, setIsTimerHidden] = useState(false);
-  const [fontScale, setFontScale] = useState<"sm" | "base" | "lg">("base");
+  const [fontScale, setFontScale] = useState<TextScale>("base");
 
   // Test data states
   const [test, setTest] = useState<ReadingTest | null>(null);
   const [isLoadingTest, setIsLoadingTest] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // The attempt starts from the intro screen; the clock only runs once started.
+  const [started, setStarted] = useState(false);
+  const [justMarked, setJustMarked] = useState(false);
+  const [pane, setPane] = useState<"left" | "right">("left");
 
   // Student answer inputs
   const [answers, setAnswers] = useState<Record<number, string>>({});
@@ -86,10 +88,7 @@ function ReadingPageContent() {
           router.push("/auth/login?redirect=/reading");
         } else {
           setToken(session.access_token);
-          if (session.user) {
-            setCandidateName(session.user.email?.split("@")[0] || "Candidate");
-            setCandidateId(`ielts-${session.user.id.substring(0, 8)}`);
-          }
+          if (session.user) setCandidateName(candidateNameFrom(session.user));
         }
       } catch (err) {
         console.error(err);
@@ -106,6 +105,7 @@ function ReadingPageContent() {
 
     const fetchTest = async () => {
       try {
+        setLoadError(null);
         const attemptId = searchParams.get("attempt_id");
         if (attemptId) {
           const { data: attemptData, error: attemptErr } = await supabase
@@ -125,6 +125,7 @@ function ReadingPageContent() {
           });
           if (!res.ok) throw new Error("Failed to load reading test");
           const tests = await res.json();
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const matchedTest = tests.find((t: any) => t.title === attemptData.test_title) || tests[0];
 
           if (matchedTest) {
@@ -137,6 +138,7 @@ function ReadingPageContent() {
               explanations: attemptData.explanations_json,
             });
             const initialAnswers: Record<number, string> = {};
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             Object.entries(attemptData.answers_json || {}).forEach(([qId, detail]: [string, any]) => {
               initialAnswers[Number(qId)] = detail.submittedAnswer || "";
             });
@@ -156,8 +158,10 @@ function ReadingPageContent() {
             setTimeLeft(data[randomIndex].duration * 60);
           }
         }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {
         console.error(err);
+        setLoadError(err.message || "Failed to load reading material.");
         toast.error(err.message || "Failed to load reading material.");
       } finally {
         setIsLoadingTest(false);
@@ -167,15 +171,15 @@ function ReadingPageContent() {
     fetchTest();
   }, [token, searchParams]);
 
-  // Start countdown timer
+  // Start countdown timer (only once the candidate has pressed Start)
   useEffect(() => {
-    if (!test || result || isSubmitting || timeLeft <= 0) return;
+    if (!started || !test || result || isSubmitting || timeLeft <= 0) return;
     const timer = setTimeout(() => {
       setTimeLeft(timeLeft - 1);
       if (timeLeft <= 1) submitRef.current(); // Auto-submit when time expires
     }, 1000);
     return () => clearTimeout(timer);
-  }, [test, result, isSubmitting, timeLeft]);
+  }, [started, test, result, isSubmitting, timeLeft]);
 
   const handleAnswerChange = (questionId: number, value: string) => {
     setAnswers((prev) => ({
@@ -205,7 +209,10 @@ function ReadingPageContent() {
       if (!response.ok) throw new Error("Failed to submit reading answers");
       const data = await response.json();
       setResult(data);
+      setJustMarked(true);
+      window.scrollTo(0, 0);
       toast.success("Reading test graded!");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       toast.error(err.message || "Failed to grade answers.");
     } finally {
@@ -220,342 +227,171 @@ function ReadingPageContent() {
   const handleReset = () => {
     setAnswers({});
     setResult(null);
+    setStarted(false);
+    setJustMarked(false);
+    setPane("left");
     if (test) setTimeLeft(test.duration * 60);
     router.replace("/reading");
   };
 
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s < 10 ? "0" : ""}${s}`;
-  };
-
   if (isAuthLoading || isLoadingTest) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <div className="text-center space-y-4">
-          <Loader2 className="h-10 w-10 animate-spin text-primary mx-auto" />
-          <p className="text-sm text-muted-foreground">Loading test module...</p>
-        </div>
-      </div>
-    );
+    return <ExamLoading shellTitle="Reading" label="Loading your reading test" />;
   }
 
   if (!test) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <div className="text-center space-y-4">
-          <AlertCircle className="h-10 w-10 text-rose-500 mx-auto" />
-          <p className="text-sm text-muted-foreground">No active reading test found.</p>
-        </div>
-      </div>
+      <ExamError
+        shellTitle="Reading"
+        title={loadError ? "The reading test did not load." : "No reading test is available."}
+        detail={
+          loadError
+            ? `${loadError}. Nothing was started and no time was used.`
+            : "There are no reading papers on the server yet."
+        }
+      />
     );
   }
 
-  const passage = test.passages[0];
+  const questions = test.passages.flatMap((p) => p.questions);
+  const answeredCount = questions.filter((q) => (answers[q.id] ?? "").trim() !== "").length;
+  const unanswered = questions.length - answeredCount;
 
-  const getTextSizeClass = () => {
-    if (fontScale === "sm") return "text-xs";
-    if (fontScale === "lg") return "text-base";
-    return "text-sm";
-  };
+  // RESULTS
+  if (result) {
+    return (
+      <AppShell title="Reading">
+        <PageColumn
+          title={`${result.score} of ${result.total_questions} correct.`}
+          lead={test.title}
+          actions={<ResultActions onRetry={handleReset} retryLabel="Take it again" />}
+        >
+          <ObjectiveResults module="Reading" result={result} questions={questions} justMarked={justMarked} />
+        </PageColumn>
+      </AppShell>
+    );
+  }
+
+  // INTRO
+  if (!started) {
+    const byType = (Object.keys(questionTypeLabel) as Question["type"][])
+      .map((type) => ({ type, items: questions.filter((q) => q.type === type) }))
+      .filter((g) => g.items.length > 0);
+    const passages = test.passages.length;
+    return (
+      <AppShell title="Reading">
+        <PageColumn
+          title={`${passages === 1 ? "One passage" : `${passages} passages`}, ${questions.length} questions, ${test.duration} minutes.`}
+          lead={`${test.title}. The clock starts when you press Start.`}
+          actions={
+            <Button variant="accent" size="lg" onClick={() => setStarted(true)}>
+              Start the test
+            </Button>
+          }
+        >
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+            <Panel className="lg:col-span-8" title="What you will answer" aside={`${questions.length} questions`}>
+              {byType.map((g) => (
+                <FactRow
+                  key={g.type}
+                  label={questionTypeLabel[g.type]}
+                  note={`Question${g.items.length > 1 ? "s" : ""} ${g.items.map((q) => q.id).join(", ")}`}
+                  value={g.items.length}
+                />
+              ))}
+            </Panel>
+            <Panel className="lg:col-span-4" title="Time allowed">
+              <p className="tabular text-[48px] leading-none text-ink">{formatClock(test.duration * 60)}</p>
+              <ul className="mt-5 flex flex-col gap-2 text-[15px] leading-normal text-soft">
+                <li>The passage sits on the left, questions on the right, as in the computer-delivered test.</li>
+                <li>Change any answer until you submit. At 0:00 your answers are submitted for you.</li>
+                <li>Marking is instant; an AI coach explains any you miss.</li>
+              </ul>
+            </Panel>
+          </div>
+        </PageColumn>
+      </AppShell>
+    );
+  }
+
+  // IN TEST
+  const firstId = questions[0]?.id;
+  const lastId = questions[questions.length - 1]?.id;
 
   return (
-    <div className="min-h-screen bg-muted/20 flex flex-col justify-between" style={{
-      "--scrollbar-thumb": "rgba(100, 116, 139, 0.4)",
-      "--scrollbar-track": "rgba(241, 245, 249, 0.5)"
-    } as any}>
-      {/* Top Header */}
-      <header className="sticky top-0 z-10 border-b border-muted/50 bg-[#333f48] text-white px-6 h-16 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
-          <a href="/dashboard">
-            <Button variant="ghost" size="icon" className="h-8 w-8 mr-1 text-white hover:bg-white/10">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </a>
-          <span className="font-bold tracking-tight text-white">IELTS CBT Practice - Reading</span>
-        </div>
-
-        {/* Center: CBT Timer */}
-        {!result && (
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2 bg-[#222a30] text-white px-4 py-1.5 rounded-md border border-white/10 text-sm font-bold font-mono">
-              <Clock className="h-4 w-4 text-[#ffc72c] animate-pulse" />
-              <span>{isTimerHidden ? "--:--" : formatTime(timeLeft)}</span>
+    <ExamFrame
+      module="Reading"
+      context={test.title}
+      candidateName={candidateName}
+      timeLeft={timeLeft}
+      timerHidden={isTimerHidden}
+      onToggleTimer={() => setIsTimerHidden(!isTimerHidden)}
+      textScale={fontScale}
+      onTextScale={setFontScale}
+      submitting={isSubmitting}
+      onSubmit={() => handleSubmit()}
+      submitConfirm={
+        unanswered > 0
+          ? `${unanswered} of ${questions.length} questions ${unanswered === 1 ? "is" : "are"} unanswered and will score zero.`
+          : null
+      }
+      exitBody="Your answers on this passage will not be saved or marked."
+      footer={
+        <QuestionNavigator
+          questions={questions}
+          answers={answers}
+          onJump={() => setPane("right")}
+        />
+      }
+    >
+      <SplitPane
+        pane={pane}
+        onPaneChange={setPane}
+        leftLabel="Passage"
+        rightLabel="Questions"
+        rightBadge={<span className="tabular text-[13px] text-soft">{answeredCount}/{questions.length}</span>}
+        left={
+          <article className="mx-auto max-w-[68ch] px-5 py-8 sm:px-10 lg:py-12">
+            {test.passages.map((passage, i) => (
+              <div key={passage.id} className={i > 0 ? "mt-14" : undefined}>
+                <p className="text-[14px] text-soft">Reading passage {passage.id}</p>
+                <h1 className="mt-1 text-[26px] font-medium leading-tight text-ink">{stripPassagePrefix(passage.title)}</h1>
+                <p
+                  className={`${passageSize[fontScale]} mt-6 whitespace-pre-wrap leading-[1.7] text-ink select-text`}
+                >
+                  {passage.text}
+                </p>
+              </div>
+            ))}
+          </article>
+        }
+        right={
+          <form
+            onSubmit={(e) => e.preventDefault()}
+            className="mx-auto max-w-[640px] px-5 py-8 sm:px-8 lg:py-12"
+          >
+            <h2 className="text-[26px] font-medium leading-tight text-ink">
+              Questions {firstId}–{lastId}
+            </h2>
+            <p className="mt-1 text-[15px] text-soft">Answer from the passage. Spelling counts on typed answers.</p>
+            <div className="mt-8">
+              <QuestionGroups
+                questions={questions}
+                answers={answers}
+                onAnswer={handleAnswerChange}
+                disabled={isSubmitting}
+                textClass={fontScale === "lg" ? "text-[18px]" : fontScale === "sm" ? "text-[15px]" : "text-[16px]"}
+              />
             </div>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => setIsTimerHidden(!isTimerHidden)}
-              className="text-xs h-8 border-white/20 text-white bg-transparent hover:bg-white/10 hover:text-white"
-            >
-              {isTimerHidden ? "Show Time" : "Hide Time"}
-            </Button>
-          </div>
-        )}
-
-        <div className="flex items-center gap-4">
-          {/* Font Resizing Controls */}
-          <div className="flex items-center gap-1 bg-[#222a30] rounded-md p-1 border border-white/10">
-            <Button 
-              size="icon" 
-              variant="ghost" 
-              onClick={() => setFontScale("sm")}
-              className={`h-7 w-7 text-xs ${fontScale === "sm" ? "bg-primary text-white" : "text-white/70"}`}
-            >
-              A-
-            </Button>
-            <Button 
-              size="icon" 
-              variant="ghost" 
-              onClick={() => setFontScale("base")}
-              className={`h-7 w-7 text-xs ${fontScale === "base" ? "bg-primary text-white" : "text-white/70"}`}
-            >
-              A
-            </Button>
-            <Button 
-              size="icon" 
-              variant="ghost" 
-              onClick={() => setFontScale("lg")}
-              className={`h-7 w-7 text-xs ${fontScale === "lg" ? "bg-primary text-white" : "text-white/70"}`}
-            >
-              A+
-            </Button>
-          </div>
-
-          {/* Candidate Info */}
-          <div className="hidden md:flex flex-col items-end text-xs">
-            <span className="font-bold text-white/95 capitalize">{candidateName}</span>
-            <span className="text-white/60 font-mono text-[10px]">{candidateId}</span>
-          </div>
-
-          <a href="/dashboard" className="text-xs font-bold text-[#ffc72c] hover:underline">
-            Exit
-          </a>
-        </div>
-      </header>
-
-      {/* Main Split Grid */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left Side: Scrollable Passage */}
-        <div className="flex-1 overflow-y-auto px-8 py-8 bg-background border-r border-muted/50" style={{
-          scrollbarColor: "var(--scrollbar-thumb) var(--scrollbar-track)",
-          scrollbarWidth: "thin"
-        }}>
-          <div className="max-w-2xl mx-auto space-y-6">
-            <h1 className="text-2xl font-black tracking-tight text-foreground">
-              {passage.title}
-            </h1>
-            <p className={`${getTextSizeClass()} text-foreground/90 leading-relaxed font-sans whitespace-pre-wrap select-text antialiased`}>
-              {passage.text}
-            </p>
-          </div>
-        </div>
-
-        {/* Right Side: Scrollable Questions form or Grading Report */}
-        <div className="w-[480px] overflow-y-auto bg-muted/30 px-6 py-8 flex flex-col justify-between shrink-0" style={{
-          scrollbarColor: "var(--scrollbar-thumb) var(--scrollbar-track)",
-          scrollbarWidth: "thin"
-        }}>
-          {!result ? (
-            // Form display
-            <form onSubmit={handleSubmit} className="space-y-6 flex-1 flex flex-col justify-between">
-              <div className="space-y-6">
-                <div>
-                  <h2 className="text-lg font-bold">Answer Questions 1 to 5</h2>
-                  <p className="text-xs text-muted-foreground mt-0.5">Based on the passage text on the left.</p>
-                </div>
-
-                <div className="space-y-6">
-                  {passage.questions.map((q) => (
-                    <div key={q.id} className="bg-background rounded-xl p-4 border border-muted/50 space-y-3 shadow-xs">
-                      <div className="flex items-start gap-2">
-                        <span className="font-bold text-sm text-primary font-mono bg-primary/10 px-2 py-0.5 rounded-md">
-                          {q.id}
-                        </span>
-                        <p className={`${getTextSizeClass()} font-semibold text-foreground leading-normal`}>{q.questionText}</p>
-                      </div>
-
-                      {q.type === "true-false-not-given" && (
-                        <div className="flex flex-wrap gap-2 pt-1 text-xs">
-                          {["TRUE", "FALSE", "NOT GIVEN"].map((opt) => {
-                            const isSelected = answers[q.id] === opt;
-                            return (
-                              <button
-                                key={opt}
-                                type="button"
-                                onClick={() => handleAnswerChange(q.id, opt)}
-                                className={`px-3 py-2 rounded-lg border font-bold transition-all cursor-pointer ${
-                                  isSelected 
-                                    ? "bg-primary text-primary-foreground border-primary" 
-                                    : "bg-background border-border text-foreground hover:bg-muted"
-                                }`}
-                              >
-                                {opt}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      {q.type === "multiple-choice" && (
-                        <div className="flex flex-col gap-2 pt-1">
-                          {q.options?.map((opt) => {
-                            const choiceLetter = opt.charAt(0); // e.g. "A"
-                            const isSelected = answers[q.id] === choiceLetter;
-                            return (
-                              <button
-                                key={opt}
-                                type="button"
-                                onClick={() => handleAnswerChange(q.id, choiceLetter)}
-                                className={`text-left text-xs p-2.5 rounded-lg border transition-all cursor-pointer ${
-                                  isSelected 
-                                    ? "bg-primary/5 border-primary text-primary font-bold" 
-                                    : "bg-background border-muted hover:border-primary/20 hover:bg-muted"
-                                }`}
-                              >
-                                {opt}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      {q.type === "fill-gap" && (
-                        <Input
-                          placeholder="Type your answer here..."
-                          value={answers[q.id] || ""}
-                          onChange={(e) => handleAnswerChange(q.id, e.target.value)}
-                          className="h-9 text-xs"
-                        />
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="pt-6">
-                <Button type="submit" className="w-full h-11" disabled={isSubmitting}>
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Grading answers...
-                    </>
-                  ) : (
-                    "Submit Reading Test"
-                  )}
-                </Button>
-              </div>
-            </form>
-          ) : (
-            // Grading report display
-            <div className="space-y-6 flex-1 flex flex-col justify-between animate-message-appear">
-              <div className="space-y-6">
-                {/* Overall Score */}
-                <Card className="shadow-md border-muted/50">
-                  <CardHeader className="pb-3 text-center">
-                    <CardTitle className="text-base font-bold">Reading Score Result</CardTitle>
-                  </CardHeader>
-                  <CardContent className="flex flex-col items-center justify-center space-y-3">
-                    <div className="flex h-20 w-20 items-center justify-center rounded-full border-4 border-emerald-500/20 bg-emerald-500/5">
-                      <div className="text-center">
-                        <span className="text-2xl font-black text-emerald-600 font-mono block leading-none">
-                          {result.score}/{result.total_questions}
-                        </span>
-                        <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-widest mt-0.5 block">
-                          Correct
-                        </span>
-                      </div>
-                    </div>
-                    <div className="text-center space-y-0.5">
-                      <div className="text-lg font-black text-foreground font-mono">
-                        Band {result.band_score.toFixed(1)}
-                      </div>
-                      <p className="text-xs text-muted-foreground">Estimated IELTS Reading Level</p>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Incorrect Answers & Explanations */}
-                <div className="space-y-4">
-                  <h3 className="text-sm font-bold text-foreground">Review Answers</h3>
-                  <div className="space-y-3">
-                    {passage.questions.map((q) => {
-                      const detail = result.details[q.id];
-                      const explanation = result.explanations[q.id];
-                      const isCorrect = detail?.correct;
-
-                      return (
-                        <div 
-                          key={q.id} 
-                          className={`rounded-xl p-4 border text-xs space-y-2 shadow-xs ${
-                            isCorrect 
-                              ? "bg-emerald-50/20 border-emerald-100" 
-                              : "bg-rose-50/20 border-rose-100"
-                          }`}
-                        >
-                          <div className="flex justify-between items-center">
-                            <span className="font-bold font-mono text-primary">Question {q.id}</span>
-                            <span className={`font-bold px-2 py-0.5 rounded-full text-[9px] uppercase tracking-wider ${
-                              isCorrect ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
-                            }`}>
-                              {isCorrect ? "Correct" : "Incorrect"}
-                            </span>
-                          </div>
-                          <p className="font-semibold text-foreground leading-normal">{q.questionText}</p>
-                          <div className="flex flex-col gap-1 text-[11px] pt-1">
-                            <div className="flex justify-between">
-                              <span className="text-muted-foreground">Your Answer:</span>
-                              <span className={`font-bold ${isCorrect ? "text-emerald-600" : "text-rose-600"}`}>
-                                {detail?.submittedAnswer || "(Blank)"}
-                              </span>
-                            </div>
-                            {!isCorrect && (
-                              <div className="flex justify-between border-t border-muted/20 pt-1 mt-1">
-                                <span className="text-muted-foreground">Correct Answer:</span>
-                                <span className="font-bold text-emerald-600">
-                                  {detail?.correctAnswer}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                          {!isCorrect && explanation && (
-                            <div className="bg-background/80 border border-muted/50 p-2.5 rounded-lg text-[10px] text-muted-foreground leading-relaxed mt-2 italic">
-                              <strong>AI explanation:</strong> {explanation}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-6">
-                <Button onClick={handleReset} variant="outline" className="w-full">
-                  Try Again
-                </Button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
+          </form>
+        }
+      />
+    </ExamFrame>
   );
 }
 
 export default function ReadingPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="flex min-h-screen items-center justify-center bg-background">
-          <div className="text-center space-y-4">
-            <Loader2 className="h-10 w-10 animate-spin text-primary mx-auto" />
-            <p className="text-sm text-muted-foreground">Loading test module...</p>
-          </div>
-        </div>
-      }
-    >
+    <Suspense fallback={<ExamLoading shellTitle="Reading" label="Loading your reading test" />}>
       <ReadingPageContent />
     </Suspense>
   );

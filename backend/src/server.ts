@@ -1,4 +1,6 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+// .env.local (gitignored, for local overrides) wins over .env.
+dotenv.config({ path: [".env.local", ".env"], quiet: true });
 import express from "express";
 import cors from "cors";
 
