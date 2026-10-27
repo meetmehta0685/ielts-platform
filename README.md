@@ -108,7 +108,6 @@ ielts-platform/
 ├── agent/                    # LiveKit speaking examiner worker
 ├── supabase/                 # Supabase CLI config and schema migration
 ├── render.yaml               # Render API and worker Blueprint
-├── vercel.json               # Vercel monorepo build configuration
 └── package.json              # Root development commands
 ```
 
@@ -320,7 +319,7 @@ The repository includes deployment configuration for a split frontend/API/worker
 ### Frontend on Vercel
 
 1. Import this GitHub repository into Vercel.
-2. Keep the repository root as the project root; [`vercel.json`](vercel.json) installs and builds `frontend/`.
+2. Set the project **Root Directory** to `frontend`.
 3. Add the three frontend environment variables from the table above.
 4. Set `NEXT_PUBLIC_API_URL` to the public Render API URL.
 5. Add the deployed `/auth/callback` URL to the Supabase redirect allow-list.
