@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
+import { readSseEvents } from "@/lib/sse";
 import { Loader2 } from "lucide-react";
 
 import { ChatSidebar } from "@/components/chat/chat-sidebar";
@@ -110,14 +111,6 @@ export default function ChatPage() {
     enabled: !!userId && !!token,
   });
 
-  // Auto-create chat session if redirecting from dashboard module
-  useEffect(() => {
-    if (userId && token && moduleParam && !isLoadingSessions && !hasTriggeredAutoSession) {
-      setHasTriggeredAutoSession(true);
-      createSessionMutation.mutate();
-    }
-  }, [userId, token, moduleParam, isLoadingSessions, hasTriggeredAutoSession]);
-
   // 3. Fetch all messages in the active session
   const { data: serverMessages = EMPTY_MESSAGES, isLoading: isLoadingMessages } = useQuery<Message[]>({
     queryKey: ["chat-messages", activeSessionId, token],
@@ -189,6 +182,14 @@ export default function ChatPage() {
     },
   });
 
+  // Auto-create chat session if redirecting from dashboard module
+  useEffect(() => {
+    if (userId && token && moduleParam && !isLoadingSessions && !hasTriggeredAutoSession) {
+      setHasTriggeredAutoSession(true);
+      createSessionMutation.mutate();
+    }
+  }, [userId, token, moduleParam, isLoadingSessions, hasTriggeredAutoSession]);
+
   // 5. Stream message response using ReadableStream and Server-Sent Events (SSE)
   const handleSendMessage = async (content: string, customSessionId?: string) => {
     const sessionId = customSessionId || activeSessionId;
@@ -211,52 +212,24 @@ export default function ChatPage() {
         body: JSON.stringify({ session_id: sessionId, message: content }),
       });
 
-      if (!response.ok || !response.body) {
-        throw new Error("Failed to communicate with AI Mentor");
-      }
-
-      // Read the SSE chunks live
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
       let accumulated = "";
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n");
-
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const dataStr = line.slice(6);
-              const data = JSON.parse(dataStr);
-              if (data.token) {
-                accumulated += data.token;
-                setStreamingMessage(accumulated);
-              } else if (data.error) {
-                toast.error(data.error);
-              }
-            } catch (err) {
-              // Ignore partial JSON parsing errors on chunk splits
-            }
-          }
+      await readSseEvents<{ token?: string }>(response, (data) => {
+        if (data.token) {
+          accumulated += data.token;
+          setStreamingMessage(accumulated);
         }
-      }
+      });
 
-      // Finish streaming, sync final response to local list
       const assistantMessage: Message = { role: "assistant", content: accumulated };
       setLocalMessages((prev) => [...prev, assistantMessage]);
-      setStreamingMessage("");
 
-      // Invalidate queries to refresh background persistence
-      queryClient.invalidateQueries({ queryKey: ["chat-messages", activeSessionId, token] });
+      queryClient.invalidateQueries({ queryKey: ["chat-messages", sessionId, token] });
       queryClient.invalidateQueries({ queryKey: ["chat-sessions", userId, token] });
 
     } catch (err: any) {
       toast.error(err.message || "Something went wrong during message streaming.");
     } finally {
+      setStreamingMessage("");
       setIsStreaming(false);
     }
   };

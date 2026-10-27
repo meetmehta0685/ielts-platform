@@ -13,12 +13,7 @@ import {
   useRoomContext,
   useTracks,
 } from "@livekit/components-react";
-import {
-  RoomEvent,
-  Track,
-  type Participant,
-  type TranscriptionSegment,
-} from "livekit-client";
+import { Track, type TextStreamReader } from "livekit-client";
 import {
   CheckCircle2,
   Loader2,
@@ -39,13 +34,17 @@ type RoomDetails = {
   agentDispatchError?: string | null;
   serverUrl: string;
   token: string;
+  speakingPrompt: string;
 };
+
+// Published by @livekit/agents as text streams for both the candidate's and the examiner's speech.
+const TRANSCRIPTION_TOPIC = "lk.transcription";
+const SEGMENT_ID_ATTRIBUTE = "lk.segment_id";
 
 type TranscriptLine = {
   id: string;
   text: string;
   speaker: "candidate" | "examiner";
-  final: boolean;
   startTime: number;
 };
 
@@ -54,7 +53,7 @@ export interface SpeakingLiveKitRoomProps {
   authToken: string;
   attemptId: string;
   candidateName: string;
-  prompt: string;
+  onPromptChange: (prompt: string) => void;
   onTranscriptChange: (transcript: string) => void;
   onComplete: (transcript: string) => void | Promise<void>;
 }
@@ -64,7 +63,7 @@ export default function SpeakingLiveKitRoom({
   authToken,
   attemptId,
   candidateName,
-  prompt,
+  onPromptChange,
   onTranscriptChange,
   onComplete,
 }: SpeakingLiveKitRoomProps) {
@@ -106,6 +105,7 @@ export default function SpeakingLiveKitRoom({
         }
 
         setDetails(data as RoomDetails);
+        onPromptChange((data as RoomDetails).speakingPrompt);
       } catch (error: unknown) {
         if (!(error instanceof Error && error.name === "AbortError")) {
           const message = error instanceof Error ? error.message : "Unable to create the AI speaking room.";
@@ -118,7 +118,7 @@ export default function SpeakingLiveKitRoom({
 
     createRoom();
     return () => controller.abort();
-  }, [attemptId, authToken, backendUrl, candidateName, retryNonce]);
+  }, [attemptId, authToken, backendUrl, candidateName, onPromptChange, retryNonce]);
 
   if (requestError) {
     return (
@@ -176,7 +176,7 @@ export default function SpeakingLiveKitRoom({
         agentName={details.agentName}
         agentDispatchError={details.agentDispatchError}
         candidateName={candidateName}
-        prompt={prompt}
+        prompt={details.speakingPrompt}
         onTranscriptChange={onTranscriptChange}
         onComplete={onComplete}
       />
@@ -219,46 +219,48 @@ function LiveSpeakingStage({
     [lines],
   );
 
-  const fallbackTranscript = useMemo(
-    () => lines.map((line) => `${line.speaker === "candidate" ? "Candidate" : "Examiner"}: ${line.text}`).join(" ").trim(),
-    [lines],
-  );
-
   useEffect(() => {
-    const handleTranscription = (segments: TranscriptionSegment[], participant?: Participant) => {
-      const speaker: TranscriptLine["speaker"] = participant?.isLocal ? "candidate" : "examiner";
-
+    const upsertLine = (line: TranscriptLine) => {
       setLines((currentLines) => {
-        const next = new Map(currentLines.map((line) => [line.id, line]));
-        segments.forEach((segment) => {
-          next.set(`${speaker}:${segment.id}`, {
-            id: `${speaker}:${segment.id}`,
-            text: segment.text,
-            speaker,
-            final: segment.final,
-            startTime: segment.startTime,
-          });
-        });
-
-        return Array.from(next.values()).sort((a, b) => a.startTime - b.startTime);
+        const existing = currentLines.find((current) => current.id === line.id);
+        const next = existing
+          ? currentLines.map((current) => (current.id === line.id ? { ...line, startTime: existing.startTime } : current))
+          : [...currentLines, line];
+        return next.sort((a, b) => a.startTime - b.startTime);
       });
     };
 
-    room.on(RoomEvent.TranscriptionReceived, handleTranscription);
+    const handleTranscriptionStream = async (reader: TextStreamReader, participantInfo: { identity: string }) => {
+      const speaker: TranscriptLine["speaker"] =
+        participantInfo.identity === room.localParticipant.identity ? "candidate" : "examiner";
+      const segmentId = reader.info.attributes?.[SEGMENT_ID_ATTRIBUTE] ?? reader.info.id;
+      const id = `${speaker}:${segmentId}`;
+      let text = "";
+      try {
+        for await (const chunk of reader) {
+          text += chunk;
+          upsertLine({ id, text, speaker, startTime: reader.info.timestamp });
+        }
+      } catch (error) {
+        console.error("[Speaking] Transcription stream failed:", error);
+      }
+    };
+
+    room.registerTextStreamHandler(TRANSCRIPTION_TOPIC, handleTranscriptionStream);
     return () => {
-      room.off(RoomEvent.TranscriptionReceived, handleTranscription);
+      room.unregisterTextStreamHandler(TRANSCRIPTION_TOPIC);
     };
   }, [room]);
 
   useEffect(() => {
-    onTranscriptChange(candidateTranscript || fallbackTranscript);
-  }, [candidateTranscript, fallbackTranscript, onTranscriptChange]);
+    onTranscriptChange(candidateTranscript);
+  }, [candidateTranscript, onTranscriptChange]);
 
   const finishExam = async () => {
     if (isFinishing) return;
     setIsFinishing(true);
     try {
-      await onComplete(candidateTranscript || fallbackTranscript);
+      await onComplete(candidateTranscript);
     } finally {
       setIsFinishing(false);
     }

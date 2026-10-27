@@ -1,7 +1,7 @@
 import { Response } from "express";
 import { AuthenticatedRequest } from "../middleware/authMiddleware";
 import { supabase } from "../services/supabaseClient";
-import { OpenRouterService, ChatMessage } from "../services/openrouter";
+import { ChatMessage, completeJson } from "../services/openrouter";
 import fs from "fs";
 import path from "path";
 import { rawScoreToBand } from "../utils/bandScore";
@@ -87,10 +87,9 @@ export class TestController {
       }
 
       // Gather all questions
-      const allQuestions: any[] = [];
-      test.passages.forEach((p: any) => {
-        allQuestions.push(...p.questions);
-      });
+      const allQuestions: any[] = test.passages.flatMap((p: any) =>
+        p.questions.map((q: any) => ({ ...q, passageText: p.text }))
+      );
 
       let score = 0;
       const total_questions = allQuestions.length;
@@ -109,7 +108,7 @@ export class TestController {
             questionText: q.questionText,
             studentAnswer: answers[q.id] || "No Answer",
             correctAnswer: q.correctAnswer,
-            passageContext: test.passages[0].text, // Provide context
+            passageContext: q.passageText,
           });
         }
 
@@ -142,8 +141,7 @@ Return a JSON object only. The keys should be the Question IDs as strings, and v
             { role: "system", content: "You are an IELTS tutor. Respond in valid JSON format only." },
             { role: "user", content: prompt }
           ];
-          const completion = await OpenRouterService.getCompletion(messages, "openrouter/optimus-alpha", true);
-          explanations = JSON.parse(completion.trim());
+          explanations = await completeJson(messages);
         } catch (e) {
           console.error("[AI Explanation Generation Error]:", e);
         }
@@ -246,8 +244,7 @@ Return a JSON object only. The keys should be the Question IDs as strings, and v
             { role: "system", content: "You are an IELTS tutor. Respond in valid JSON format only." },
             { role: "user", content: prompt }
           ];
-          const completion = await OpenRouterService.getCompletion(messages, "openrouter/optimus-alpha", true);
-          explanations = JSON.parse(completion.trim());
+          explanations = await completeJson(messages);
         } catch (e) {
           console.error("[AI Listening Explanation Error]:", e);
         }

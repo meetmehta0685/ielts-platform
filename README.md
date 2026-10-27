@@ -104,11 +104,9 @@ ielts-platform/
 │       ├── middleware/       # Supabase bearer-token authentication
 │       ├── routes/           # API route definitions
 │       ├── services/         # OpenRouter and Supabase clients
-│       └── utils/            # IELTS band-score conversion
+│       └── utils/            # Band-score conversion and SSE helpers
 ├── agent/                    # LiveKit speaking examiner worker
-├── plans/                    # Engineering improvement plans
-├── complete_schema.sql       # Complete Supabase schema, policies, and triggers
-├── supabase_schema.sql       # Legacy/minimal chat-only schema
+├── supabase/                 # Supabase CLI config and schema migration
 ├── render.yaml               # Render API and worker Blueprint
 ├── vercel.json               # Vercel monorepo build configuration
 └── package.json              # Root development commands
@@ -138,21 +136,23 @@ npm run install:all
 
 ### 2. Create the Supabase database
 
-1. Create a Supabase project.
-2. Open **SQL Editor** in the Supabase dashboard.
-3. Run the complete [`complete_schema.sql`](complete_schema.sql) script.
+The whole schema (tables, RLS policies, timestamp triggers and the profile-on-signup trigger) lives in [`supabase/migrations/20260101000000_init.sql`](supabase/migrations/20260101000000_init.sql).
 
-The script creates the application tables, indexes, RLS policies, timestamp triggers, and the profile-on-signup trigger. It is safe to rerun because it uses idempotent table/policy/trigger setup.
+**Hosted project:** create a Supabase project, then either paste the migration into the **SQL Editor** or push it with the CLI:
 
-The main tables are:
+```bash
+npx supabase link --project-ref <your-project-ref>
+npx supabase db push
+```
 
-- `profiles`
-- `chat_sessions` and `chat_messages`
-- `writing_submissions` and `speaking_submissions`
-- `reading_attempts` and `listening_attempts`
-- `study_plans`
+**Local (Docker):** run the full Supabase stack locally on ports `553xx`:
 
-Use `complete_schema.sql` for a new installation. `supabase_schema.sql` contains only the earlier chat schema and is retained for reference.
+```bash
+npx supabase start
+npx supabase status   # prints the API URL, anon key and service role key
+```
+
+The main tables are `profiles`, `chat_sessions`/`chat_messages`, `writing_submissions`/`speaking_submissions`, `reading_attempts`/`listening_attempts` and `study_plans` (one row per user).
 
 ### 3. Configure authentication
 
@@ -168,7 +168,9 @@ Also set the Supabase Site URL to the appropriate frontend origin for each envir
 
 ### 4. Configure environment variables
 
-Create `frontend/.env.local`:
+Copy `frontend/.env.example` to `frontend/.env.local` and `backend/.env.example` to `backend/.env`, then fill them in.
+
+`frontend/.env.local`:
 
 ```dotenv
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
@@ -176,7 +178,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
 NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 
-Create `backend/.env`:
+`backend/.env`:
 
 ```dotenv
 PORT=8000
@@ -217,6 +219,8 @@ Then add the same LiveKit URL, key, secret, and agent name used by the backend. 
 | Backend | `SUPABASE_URL` | Yes | Supabase project URL |
 | Backend | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Server-only key for authenticated database operations |
 | Backend | `OPENROUTER_API_KEY` | Yes | AI mentor, study-plan, writing, and speaking evaluation requests |
+| Backend | `OPENROUTER_MODELS` | No | Comma-separated fallback list (up to three); defaults to free Gemma 4 / Laguna models |
+| Backend | `CORS_ORIGIN` | No | Comma-separated allowed origins; defaults to all |
 | Backend | `GROQ_API_KEY` | Speaking practice | Whisper audio transcription |
 | Backend | `ELEVENLABS_API_KEY` | No | Higher-quality question speech; browser TTS is used when absent |
 | Backend | `ELEVENLABS_VOICE_ID` | No | ElevenLabs voice override |
@@ -276,7 +280,7 @@ npm run build --prefix backend
 npm run typecheck --prefix agent
 ```
 
-The project currently has no automated test suite. Run the lint, build, and type-check commands before opening a pull request.
+The project has no automated test suite. Run the build and type-check commands before opening a pull request.
 
 ## API reference
 
@@ -294,11 +298,9 @@ Authorization: Bearer <supabase-access-token>
 | `GET` | `/api/chat/messages/:sessionId` | Get messages for a chat session |
 | `POST` | `/api/chat/stream` | Stream a mentor response over SSE |
 | `POST` | `/api/writing/evaluate` | Evaluate and save a Task 1 or Task 2 response over SSE |
-| `GET` | `/api/writing/history` | List saved writing evaluations |
 | `POST` | `/api/speaking/transcribe` | Transcribe a multipart `audio` upload with Groq Whisper |
 | `POST` | `/api/speaking/evaluate` | Evaluate and save a speaking transcript over SSE |
 | `POST` | `/api/speaking/synthesize` | Synthesize examiner speech or request browser fallback |
-| `GET` | `/api/speaking/history` | List saved speaking evaluations |
 | `GET` | `/api/test/reading/tests` | Get the bundled reading tests |
 | `POST` | `/api/test/reading/submit` | Score and save a reading attempt |
 | `GET` | `/api/test/listening/tests` | Get the bundled listening tests |
@@ -356,7 +358,7 @@ Sign out and back in to refresh the Supabase session. Also confirm that the fron
 
 ### Signup succeeds but profile pages fail
 
-Run `complete_schema.sql` and confirm that the `on_auth_user_created` trigger exists. Existing Auth users may need a matching row inserted into `public.profiles`.
+Apply the migration in `supabase/migrations/` and confirm that the `on_auth_user_created` trigger exists. Existing Auth users may need a matching row inserted into `public.profiles`.
 
 ### Speaking transcription says the Groq key is missing
 
@@ -381,4 +383,3 @@ This is non-fatal. Standalone speaking practice returns a fallback signal and us
 3. Run frontend lint/build, backend build, and agent type-check as relevant.
 4. Open a pull request describing the learner-facing behavior and verification performed.
 
-Useful engineering follow-ups and implementation notes are tracked in the [`plans/`](plans/) directory.

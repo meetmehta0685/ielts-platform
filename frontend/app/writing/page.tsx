@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { toast } from "sonner";
+import { readSseEvents } from "@/lib/sse";
 import { Loader2, PenTool, CheckCircle, ChevronRight, AlertTriangle, ArrowLeft, RefreshCw, FileText, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -159,7 +160,7 @@ function WritingPageContent() {
 
   // Timer states
   const [timeLeft, setTimeLeft] = useState(2400); // Default Task 2: 40 mins
-  const [isTimerActive, setIsTimerActive] = useState(false);
+  const evaluateRef = useRef<() => void>(() => {});
 
   // Sync session client-side
   useEffect(() => {
@@ -238,49 +239,29 @@ function WritingPageContent() {
   useEffect(() => {
     if (!result) {
       setTimeLeft(taskType === "task1" ? 1200 : 2400);
-      setIsTimerActive(false);
     }
   }, [taskType, result]);
 
-  // Activate timer when prompt is set
+  // Countdown runs while a prompt is set and no evaluation is in progress
+  const isTimerActive = !!prompt && !result && !isGrading;
   useEffect(() => {
-    if (prompt && !result && !isGrading) {
-      setIsTimerActive(true);
-    } else {
-      setIsTimerActive(false);
-    }
-  }, [prompt, result, isGrading]);
-
-  // Countdown timer logic
-  useEffect(() => {
-    let timer: NodeJS.Timeout | null = null;
-    if (isTimerActive && timeLeft > 0) {
-      timer = setInterval(() => {
-        setTimeLeft((prev) => {
-          if (prev <= 1) {
-            clearInterval(timer!);
-            setIsTimerActive(false);
-            toast.warning("Time's up! Automatically evaluating your response.");
-            // Submit automatically
-            const mockEvent = { preventDefault: () => {} } as any;
-            handleEvaluate(mockEvent);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    }
-    return () => {
-      if (timer) clearInterval(timer);
-    };
+    if (!isTimerActive || timeLeft <= 0) return;
+    const timer = setTimeout(() => {
+      setTimeLeft(timeLeft - 1);
+      if (timeLeft <= 1) {
+        toast.warning("Time's up! Automatically evaluating your response.");
+        evaluateRef.current();
+      }
+    }, 1000);
+    return () => clearTimeout(timer);
   }, [isTimerActive, timeLeft]);
 
   const handleSelectSample = (sample: string) => {
     setPrompt(sample);
   };
 
-  const handleEvaluate = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleEvaluate = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     if (!token) {
       toast.error("Session expired. Please log in again.");
       return;
@@ -316,75 +297,32 @@ function WritingPageContent() {
         }),
       });
 
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({ error: "Failed to grade your essay." }));
-        throw new Error(errData.error || "Failed to grade your essay. Please try again.");
-      }
-
-      if (!response.body) {
-        throw new Error("No response body received from stream.");
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
       let accumulated = "";
       let finalResult: EvaluationResult | null = null;
 
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n");
-
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const dataStr = line.slice(6).trim();
-              if (dataStr === "[DONE]") continue;
-
-              const data = JSON.parse(dataStr);
-              if (data.token) {
-                accumulated += data.token;
-                setStreamingText(accumulated);
-              } else if (data.done) {
-                finalResult = {
-                  id: data.id,
-                  band_score: Number(data.result.band_score),
-                  task_response: Number(data.result.task_response),
-                  coherence_cohesion: Number(data.result.coherence_cohesion),
-                  lexical_resource: Number(data.result.lexical_resource),
-                  grammar_accuracy: Number(data.result.grammar_accuracy),
-                  corrections: data.result.corrections || [],
-                  vocabulary_suggestions: data.result.vocabulary_suggestions || [],
-                  improved_essay: data.result.improved_essay || "",
-                  improvements: data.result.improvements || [],
-                };
-              } else if (data.error) {
-                throw new Error(data.error);
-              }
-            } catch (err) {
-              // Ignore chunk boundaries JSON parse issues
-            }
-          }
+      await readSseEvents<{ token?: string; done?: boolean; id?: string; result?: any }>(response, (data) => {
+        if (data.token) {
+          accumulated += data.token;
+          setStreamingText(accumulated);
+        } else if (data.done && data.result) {
+          finalResult = {
+            id: data.id,
+            band_score: Number(data.result.band_score),
+            task_response: Number(data.result.task_response),
+            coherence_cohesion: Number(data.result.coherence_cohesion),
+            lexical_resource: Number(data.result.lexical_resource),
+            grammar_accuracy: Number(data.result.grammar_accuracy),
+            corrections: data.result.corrections || [],
+            vocabulary_suggestions: data.result.vocabulary_suggestions || [],
+            improved_essay: data.result.improved_essay || "",
+            improvements: data.result.improvements || [],
+          };
         }
-      }
+      });
 
       if (finalResult) {
         setResult(finalResult);
         toast.success("Essay evaluated successfully!");
-        // Background refresh user study roadmap based on new score averages
-        fetch(`${BACKEND_URL}/api/planner/generate`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-        }).then(res => {
-          if (res.ok) {
-            toast.info("Your study plan has been updated with these results.");
-          }
-        }).catch(err => console.error("Roadmap auto-sync failed:", err));
       } else {
         throw new Error("Failed to receive completed evaluation from server.");
       }
@@ -395,6 +333,10 @@ function WritingPageContent() {
       setStreamingText("");
     }
   };
+
+  useEffect(() => {
+    evaluateRef.current = handleEvaluate;
+  });
 
   const getScoreColor = (score: number) => {
     if (score >= 7.5) return "text-emerald-600 bg-emerald-50 border-emerald-200 dark:text-emerald-400 dark:bg-emerald-500/10";

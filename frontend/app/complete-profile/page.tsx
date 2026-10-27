@@ -48,25 +48,6 @@ export default function CompleteProfilePage() {
   const [isVerifying, setIsVerifying] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  useEffect(() => {
-    const getUserSession = async () => {
-      try {
-        const { data: { user }, error } = await supabase.auth.getUser();
-        if (error || !user) {
-          toast.error("You must be logged in to view this page.");
-          router.push("/auth/login");
-        } else {
-          setUser(user);
-        }
-      } catch (err) {
-        router.push("/auth/login");
-      } finally {
-        setIsVerifying(false);
-      }
-    };
-    getUserSession();
-  }, [router]);
-
   const form = useForm<CompleteProfileValues>({
     resolver: zodResolver(completeProfileSchema),
     defaultValues: {
@@ -77,6 +58,40 @@ export default function CompleteProfilePage() {
       studyHours: 2,
     },
   });
+
+  useEffect(() => {
+    const getUserSession = async () => {
+      try {
+        const { data: { user }, error } = await supabase.auth.getUser();
+        if (error || !user) {
+          toast.error("You must be logged in to view this page.");
+          router.push("/auth/login");
+        } else {
+          setUser(user);
+          // Pre-fill from an existing profile so revisiting onboarding never resets it to defaults.
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("current_band, target_band, exam_date, weak_areas, study_hours_per_day")
+            .eq("id", user.id)
+            .maybeSingle();
+          if (profile?.exam_date) {
+            form.reset({
+              currentBand: profile.current_band != null ? Number(profile.current_band).toFixed(1) : "",
+              targetBand: Number(profile.target_band).toFixed(1),
+              examDate: profile.exam_date,
+              weakAreas: profile.weak_areas || [],
+              studyHours: profile.study_hours_per_day || 2,
+            });
+          }
+        }
+      } catch (err) {
+        router.push("/auth/login");
+      } finally {
+        setIsVerifying(false);
+      }
+    };
+    getUserSession();
+  }, [router, form]);
 
   const onSubmit = async (values: CompleteProfileValues) => {
     if (!user) return;
@@ -92,7 +107,6 @@ export default function CompleteProfilePage() {
           exam_date: values.examDate,
           weak_areas: values.weakAreas,
           study_hours_per_day: values.studyHours,
-          updated_at: new Date().toISOString(),
         });
 
       if (error) throw error;

@@ -70,7 +70,7 @@ function ReadingPageContent() {
 
   // Timer states
   const [timeLeft, setTimeLeft] = useState(3600); // 60 mins
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const submitRef = useRef<() => void>(() => {});
 
   // Grading states
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -169,22 +169,13 @@ function ReadingPageContent() {
 
   // Start countdown timer
   useEffect(() => {
-    if (test && !result && !isSubmitting) {
-      timerRef.current = setInterval(() => {
-        setTimeLeft((prev) => {
-          if (prev <= 1) {
-            clearInterval(timerRef.current!);
-            handleSubmit(); // Auto-submit when time expires
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    }
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [test, result, isSubmitting]);
+    if (!test || result || isSubmitting || timeLeft <= 0) return;
+    const timer = setTimeout(() => {
+      setTimeLeft(timeLeft - 1);
+      if (timeLeft <= 1) submitRef.current(); // Auto-submit when time expires
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [test, result, isSubmitting, timeLeft]);
 
   const handleAnswerChange = (questionId: number, value: string) => {
     setAnswers((prev) => ({
@@ -215,13 +206,16 @@ function ReadingPageContent() {
       const data = await response.json();
       setResult(data);
       toast.success("Reading test graded!");
-      if (timerRef.current) clearInterval(timerRef.current);
     } catch (err: any) {
       toast.error(err.message || "Failed to grade answers.");
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  useEffect(() => {
+    submitRef.current = handleSubmit;
+  });
 
   const handleReset = () => {
     setAnswers({});

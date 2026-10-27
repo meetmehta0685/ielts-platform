@@ -1,6 +1,6 @@
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { createClient } from "@supabase/supabase-js";
+import { requireServerUser } from "@/lib/supabase-server";
+import { loadTrackRecord } from "@/lib/track-record";
 import { LogoutButton } from "@/components/auth/logout-button";
 import {
   Card,
@@ -32,153 +32,21 @@ import { DashboardCharts } from "@/components/dashboard/dashboard-charts";
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export default async function DashboardPage() {
-  const cookieStore = await cookies();
-  const authCookie = cookieStore.get("sb-auth-token");
+  const { supabase, user, accessToken } = await requireServerUser("/dashboard");
 
-  if (!authCookie?.value) {
-    redirect("/auth/login");
-  }
-
-  let user = null;
-  let profile = null;
-  let stats = null;
-  let trackRecord: any[] = [];
-
-  try {
-    let session;
-    try {
-      session = JSON.parse(authCookie.value);
-    } catch (err) {
-      try {
-        session = JSON.parse(decodeURIComponent(authCookie.value));
-      } catch (innerErr) {
-        console.error("Failed to parse auth cookie in dashboard:", innerErr);
-        redirect("/auth/login");
-      }
-    }
-    const token = session?.access_token;
-
-    if (!token) {
-      redirect("/auth/login");
-    }
-
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-    // Create a server-side Supabase client with the user's token passed in headers to honor RLS policies
-    const serverSupabase = createClient(supabaseUrl, supabaseAnonKey, {
-      auth: { persistSession: false },
-      global: {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      },
-    });
-
-    // Verify session/token
-    const { data: { user: verifiedUser }, error: userError } = await serverSupabase.auth.getUser(token);
-    if (userError || !verifiedUser) {
-      console.error("[Dashboard Page] getUser failed:", userError?.message || "User is null");
-      redirect("/auth/login");
-    }
-    user = verifiedUser;
-    console.log("[Dashboard Page] User verified:", user.id);
-
-    // Fetch the profile for this user
-    const { data: profileData, error: profileError } = await serverSupabase
-      .from("profiles")
-      .select("*")
-      .eq("id", user.id)
-      .single();
-
-    if (profileError) {
-      console.error("[Dashboard Page] Error fetching user profile:", profileError.message || profileError);
-    }
-    profile = profileData;
-    console.log("[Dashboard Page] Profile details loaded:", profile ? "Yes" : "No", "Target Band:", profile?.target_band, "Study Hours:", profile?.study_hours_per_day);
-
-    // Fetch dashboard stats from Express backend
-    try {
-      const statsRes = await fetch(`${BACKEND_URL}/api/dashboard/stats`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        next: { revalidate: 0 },
-      });
-      if (statsRes.ok) {
-        stats = await statsRes.json();
-      }
-    } catch (statsErr) {
-      console.error("Failed to fetch dashboard stats from Express backend:", statsErr);
-    }
-
-    // Fetch all module attempts in parallel for the track record log
-    try {
-      const [writingRes, speakingRes, readingRes, listeningRes] = await Promise.all([
-        serverSupabase
-          .from("writing_submissions")
-          .select("id, task_type, band_score, created_at")
-          .eq("user_id", user.id),
-        serverSupabase
-          .from("speaking_submissions")
-          .select("id, part, band_score, created_at")
-          .eq("user_id", user.id),
-        serverSupabase
-          .from("reading_attempts")
-          .select("id, test_title, score, total_questions, band_score, created_at")
-          .eq("user_id", user.id),
-        serverSupabase
-          .from("listening_attempts")
-          .select("id, test_title, score, total_questions, band_score, created_at")
-          .eq("user_id", user.id)
-      ]);
-
-      const writingList = (writingRes.data || []).map(w => ({
-        id: w.id,
-        module: "Writing",
-        title: w.task_type === "task1" ? "Task 1: Academic Report" : "Task 2: Essay writing",
-        score: w.band_score ? `Band ${Number(w.band_score).toFixed(1)}` : "Pending Evaluation",
-        rawScore: null,
-        date: new Date(w.created_at)
-      }));
-
-      const speakingList = (speakingRes.data || []).map(s => ({
-        id: s.id,
-        module: "Speaking",
-        title: `Part ${s.part} Audio Interview`,
-        score: s.band_score ? `Band ${Number(s.band_score).toFixed(1)}` : "Pending Evaluation",
-        rawScore: null,
-        date: new Date(s.created_at)
-      }));
-
-      const readingList = (readingRes.data || []).map(r => ({
-        id: r.id,
-        module: "Reading",
-        title: r.test_title || "Comprehension Practice Test",
-        score: `Band ${Number(r.band_score).toFixed(1)}`,
-        rawScore: `${r.score}/${r.total_questions || 40}`,
-        date: new Date(r.created_at)
-      }));
-
-      const listeningList = (listeningRes.data || []).map(l => ({
-        id: l.id,
-        module: "Listening",
-        title: l.test_title || "Listening Audio Test",
-        score: `Band ${Number(l.band_score).toFixed(1)}`,
-        rawScore: `${l.score}/${l.total_questions || 40}`,
-        date: new Date(l.created_at)
-      }));
-
-      trackRecord = [...writingList, ...speakingList, ...readingList, ...listeningList]
-        .sort((a, b) => b.date.getTime() - a.date.getTime());
-    } catch (dbErr) {
-      console.error("Failed to fetch user attempts from DB:", dbErr);
-    }
-
-  } catch (err) {
-    console.error("Dashboard auth verification error:", err);
-    redirect("/auth/login");
-  }
+  const [{ data: profile }, stats, trackRecord] = await Promise.all([
+    supabase.from("profiles").select("*").eq("id", user.id).maybeSingle(),
+    fetch(`${BACKEND_URL}/api/dashboard/stats`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: "no-store",
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .catch((err) => {
+        console.error("Failed to fetch dashboard stats:", err);
+        return null;
+      }),
+    loadTrackRecord(supabase, user.id),
+  ]);
 
   // If no profile exists yet, or they haven't finished onboarding, redirect them
   if (!profile || !profile.target_band || !profile.study_hours_per_day || !profile.exam_date) {
@@ -495,7 +363,7 @@ export default async function DashboardPage() {
                             {record.title}
                           </td>
                           <td className="px-6 py-4 text-slate-400 font-medium">
-                            {record.date.toLocaleDateString("en-US", {
+                            {new Date(record.date).toLocaleDateString("en-US", {
                               year: "numeric",
                               month: "short",
                               day: "numeric",

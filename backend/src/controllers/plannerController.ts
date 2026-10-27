@@ -1,7 +1,7 @@
 import { Response } from "express";
 import { AuthenticatedRequest } from "../middleware/authMiddleware";
 import { supabase } from "../services/supabaseClient";
-import { OpenRouterService, ChatMessage } from "../services/openrouter";
+import { ChatMessage, completeJson } from "../services/openrouter";
 
 export class PlannerController {
   /**
@@ -100,60 +100,19 @@ DIAGNOSTIC ADAPTATION INSTRUCTIONS:
         { role: "user", content: userContent },
       ];
 
-      // Call OpenRouter
-      const completionText = await OpenRouterService.getCompletion(
-        messages,
-        "nvidia/nemotron-nano-9b-v2:free",
-        true
-      );
-
       let resultJSON: any;
       try {
-        let cleanText = completionText.trim();
-        if (cleanText.startsWith("```json")) {
-          cleanText = cleanText.substring(7);
-        }
-        if (cleanText.endsWith("```")) {
-          cleanText = cleanText.substring(0, cleanText.length - 3);
-        }
-        resultJSON = JSON.parse(cleanText.trim());
-      } catch (parseErr) {
-        console.error("[Planner Parse Error] Raw text:", completionText);
-        res.status(502).json({ error: "AI returned an invalid JSON planner schema." });
+        resultJSON = await completeJson(messages);
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        res.status(502).json({ error: "AI returned an invalid study plan. Please try again." });
         return;
       }
 
-      // 3. Store in study_plans table by checking if user already has an active plan
-      const { data: existingPlan } = await supabase
+      const { error: dbErr } = await supabase
         .from("study_plans")
-        .select("id")
-        .eq("user_id", user_id)
-        .maybeSingle();
-
-      let dbErr;
-      if (existingPlan) {
-        const { error } = await supabase
-          .from("study_plans")
-          .update({
-            plan_json: resultJSON,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", existingPlan.id);
-        dbErr = error;
-      } else {
-        const { error } = await supabase
-          .from("study_plans")
-          .insert({
-            user_id,
-            plan_json: resultJSON,
-            updated_at: new Date().toISOString(),
-          });
-        dbErr = error;
-      }
-
-      if (dbErr) {
-        console.error("[DB Store Error for Study Plan]:", dbErr);
-      }
+        .upsert({ user_id, plan_json: resultJSON }, { onConflict: "user_id" });
+      if (dbErr) throw dbErr;
 
       res.status(200).json(resultJSON);
     } catch (error: any) {
@@ -201,26 +160,17 @@ DIAGNOSTIC ADAPTATION INSTRUCTIONS:
         return;
       }
 
-      const { data: existingPlan } = await supabase
+      const { data, error } = await supabase
         .from("study_plans")
-        .select("id")
+        .update({ plan_json })
         .eq("user_id", user_id)
-        .maybeSingle();
+        .select("id");
 
-      if (!existingPlan) {
+      if (error) throw error;
+      if (!data?.length) {
         res.status(404).json({ error: "No active study plan found to update." });
         return;
       }
-
-      const { error } = await supabase
-        .from("study_plans")
-        .update({
-          plan_json,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", existingPlan.id);
-
-      if (error) throw error;
 
       res.status(200).json({ success: true, message: "Study plan updated successfully." });
     } catch (error: any) {

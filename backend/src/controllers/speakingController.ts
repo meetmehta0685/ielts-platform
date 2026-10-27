@@ -1,9 +1,9 @@
 import { Response } from "express";
 import { AuthenticatedRequest } from "../middleware/authMiddleware";
 import { supabase } from "../services/supabaseClient";
-import { OpenRouterService, ChatMessage } from "../services/openrouter";
+import { ChatMessage } from "../services/openrouter";
+import { streamJsonEvaluation } from "../utils/sse";
 import { z } from "zod";
-import axios from "axios";
 
 const evaluateSpeakingSchema = z.object({
   part: z.union([z.literal(1), z.literal(2), z.literal(3)]),
@@ -76,7 +76,7 @@ export class SpeakingController {
       // 1. Validate inputs
       const parsed = evaluateSpeakingSchema.safeParse(req.body);
       if (!parsed.success) {
-        res.status(400).json({ error: parsed.error.format() });
+        res.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid request" });
         return;
       }
 
@@ -129,99 +129,32 @@ CANDIDATE TRANSCRIPT:
         { role: "user", content: userContent },
       ];
 
-      // Set headers for Server-Sent Events (SSE)
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("Connection", "keep-alive");
-      res.flushHeaders(); // Establish connection
-
-      let assistantResponse = "";
-
-      await OpenRouterService.streamCompletion(
-        messages,
-        (token) => {
-          assistantResponse += token;
-          // Send SSE formatted data token
-          res.write(`data: ${JSON.stringify({ token })}\n\n`);
-        },
-        async () => {
-          try {
-            // Parse JSON
-            let cleanText = assistantResponse.trim();
-            if (cleanText.startsWith("```json")) {
-              cleanText = cleanText.substring(7);
-            }
-            if (cleanText.endsWith("```")) {
-              cleanText = cleanText.substring(0, cleanText.length - 3);
-            }
-            const resultJSON = JSON.parse(cleanText.trim());
-
-            // Save the speaking response to supabase
-            const { data: dbRecord, error: dbErr } = await supabase
-              .from("speaking_submissions")
-              .insert({
-                user_id,
-                part,
-                prompt,
-                transcript,
-                band_score: resultJSON.band_score,
-                fluency_coherence: resultJSON.fluency_coherence,
-                lexical_resource: resultJSON.lexical_resource,
-                grammatical_range: resultJSON.grammatical_range,
-                pronunciation: resultJSON.pronunciation,
-                feedback_json: {
-                  examiner_comments: resultJSON.examiner_comments || "",
-                  improvements: resultJSON.improvements || [],
-                },
-              })
-              .select()
-              .single();
-
-            if (dbErr) {
-              console.error("[DB Store Error for Speaking Submission]:", dbErr);
-            }
-
-            // Send SSE done signal containing the dbRecord id and parsed JSON
-            res.write(`data: ${JSON.stringify({ done: true, id: dbRecord?.id, result: resultJSON })}\n\n`);
-          } catch (parseErr) {
-            console.error("[Speaking Evaluation Parse/Store Error] Raw text:", assistantResponse, parseErr);
-            res.write(`data: ${JSON.stringify({ error: "AI returned an invalid JSON response structure." })}\n\n`);
-          } finally {
-            res.write("data: [DONE]\n\n");
-            res.end();
-          }
-        },
-        (error) => {
-          console.error("[Speaking Streaming Error]:", error);
-          res.write(`data: ${JSON.stringify({ error: error.message || "Failed to stream message" })}\n\n`);
-          res.end();
-        },
-        "openai/gpt-oss-20b:free"
-      );
+      await streamJsonEvaluation<any>(res, messages, async (result) => {
+        const { data, error } = await supabase
+          .from("speaking_submissions")
+          .insert({
+            user_id,
+            part,
+            prompt,
+            transcript,
+            band_score: result.band_score,
+            fluency_coherence: result.fluency_coherence,
+            lexical_resource: result.lexical_resource,
+            grammatical_range: result.grammatical_range,
+            pronunciation: result.pronunciation,
+            feedback_json: {
+              examiner_comments: result.examiner_comments || "",
+              improvements: result.improvements || [],
+            },
+          })
+          .select("id")
+          .single();
+        if (error) throw error;
+        return data.id;
+      });
     } catch (error: any) {
       console.error("[Speaking Evaluation Router Error]:", error);
-      res.status(500).json({ error: error.message || "Internal server error" });
-    }
-  }
-
-  /**
-   * Get user's speaking history.
-   */
-  static async getSubmissions(req: AuthenticatedRequest, res: Response): Promise<void> {
-    try {
-      const user_id = req.user.id;
-      const { data, error } = await supabase
-        .from("speaking_submissions")
-        .select("*")
-        .eq("user_id", user_id)
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-
-      res.status(200).json(data);
-    } catch (error: any) {
-      console.error("[Get Speaking Submissions Error]:", error);
-      res.status(500).json({ error: error.message || "Failed to fetch speaking submissions" });
+      if (!res.headersSent) res.status(500).json({ error: error.message || "Internal server error" });
     }
   }
 
@@ -244,41 +177,33 @@ CANDIDATE TRANSCRIPT:
         return;
       }
 
-      const voiceId = process.env.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM"; // Rachel default
-      const modelId = "eleven_monolingual_v1";
-
-      const response = await axios({
-        method: "post",
-        url: `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+      const voiceId = process.env.ELEVENLABS_VOICE_ID || "EXAVITQu4vr4xnSDxMaL"; // premade "Sarah"
+      const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+        method: "POST",
         headers: {
           "xi-api-key": ELEVENLABS_API_KEY,
           "Content-Type": "application/json",
           accept: "audio/mpeg",
         },
-        data: {
+        body: JSON.stringify({
           text,
-          model_id: modelId,
-          voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.75,
-          },
-        },
-        responseType: "arraybuffer",
+          model_id: "eleven_flash_v2_5",
+          voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+        }),
       });
 
-      res.set({
-        "Content-Type": "audio/mpeg",
-        "Transfer-Encoding": "chunked",
-      });
-      res.send(Buffer.from(response.data));
+      if (!response.ok) {
+        const errorMsg = await response.text();
+        console.error("[ElevenLabs Synthesis Error]:", errorMsg);
+        res.status(200).json({ fallback: true, error: "ElevenLabs synthesis failed" });
+        return;
+      }
+
+      res.set("Content-Type", "audio/mpeg");
+      res.send(Buffer.from(await response.arrayBuffer()));
     } catch (error: any) {
-      const errorMsg = error?.response?.data
-        ? Buffer.isBuffer(error.response.data)
-          ? error.response.data.toString()
-          : JSON.stringify(error.response.data)
-        : error.message;
-      console.error("[ElevenLabs Synthesis Error]:", errorMsg);
-      res.status(200).json({ fallback: true, error: errorMsg || "ElevenLabs synthesis failed" });
+      console.error("[ElevenLabs Synthesis Error]:", error);
+      res.status(200).json({ fallback: true, error: "ElevenLabs synthesis failed" });
     }
   }
 }

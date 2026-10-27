@@ -140,8 +140,8 @@ export default function PlannerPage() {
       });
 
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Failed to generate roadmap.");
+        const err = await res.json().catch(() => null);
+        throw new Error(typeof err?.error === "string" ? err.error : "Failed to generate roadmap.");
       }
 
       const generated = await res.json();

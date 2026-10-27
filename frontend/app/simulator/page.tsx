@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type CSSProperties } from "react";
 import dynamic from "next/dynamic";
 import { supabase } from "@/lib/supabase";
+import { readSseEvents } from "@/lib/sse";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, ArrowLeft, Clock, BookOpen, Play, Pause, ArrowRight, PenTool } from "lucide-react";
@@ -18,12 +19,128 @@ const SpeakingLiveKitRoom = dynamic(
   { ssr: false },
 );
 
+type Question = {
+  id: number;
+  type: "fill-gap" | "multiple-choice" | "true-false-not-given";
+  questionText: string;
+  options?: string[];
+};
+
+type ListeningTest = {
+  id: string;
+  title: string;
+  sections: { id: number; audioUrl: string; instructions: string; questions: Question[] }[];
+};
+
+type ReadingTest = {
+  id: string;
+  title: string;
+  passages: { id: number; title: string; text: string; questions: Question[] }[];
+};
+
+type Step = "intro" | "listening" | "reading" | "writing" | "speaking" | "report";
+
+const STEP_SECONDS: Partial<Record<Step, number>> = {
+  listening: 30 * 60,
+  reading: 60 * 60,
+  writing: 60 * 60,
+  speaking: 12 * 60,
+};
+
+const createAttemptId = () =>
+  typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `attempt-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+type EvaluationEvent = { done?: boolean; result?: { band_score?: number } };
+
 function calculateOverallIELTS(scores: number[]) {
   const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
   const decimal = avg - Math.floor(avg);
   if (decimal < 0.25) return Math.floor(avg);
   if (decimal >= 0.25 && decimal < 0.75) return Math.floor(avg) + 0.5;
   return Math.floor(avg) + 1.0;
+}
+
+const formatBand = (score: number | null) => (score !== null ? score.toFixed(1) : "Not graded");
+
+const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+const escapeHtml = (value: string) =>
+  value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+
+async function streamBandScore(response: Response) {
+  let bandScore: number | null = null;
+  await readSseEvents<EvaluationEvent>(response, (event) => {
+    if (event.done && typeof event.result?.band_score === "number") {
+      bandScore = event.result.band_score;
+    }
+  });
+  if (bandScore === null) throw new Error("No final band score received.");
+  return bandScore;
+}
+
+function QuestionField({
+  question,
+  value,
+  onChange,
+  disabled,
+  textSizeClass,
+}: {
+  question: Question;
+  value: string;
+  onChange: (value: string) => void;
+  disabled: boolean;
+  textSizeClass: string;
+}) {
+  const choices =
+    question.type === "true-false-not-given"
+      ? ["TRUE", "FALSE", "NOT GIVEN"].map((opt) => ({ label: opt, value: opt }))
+      : question.type === "multiple-choice"
+        ? (question.options ?? []).map((opt) => ({ label: opt, value: opt.charAt(0) }))
+        : null;
+
+  return (
+    <div className="p-4 border border-muted/50 bg-background rounded-xl space-y-3 shadow-xs">
+      <div className="text-[10px] font-bold text-muted-foreground uppercase font-mono">Question {question.id}</div>
+      <p className={`${textSizeClass} font-semibold leading-normal text-foreground`}>{question.questionText}</p>
+      {choices ? (
+        <div className={question.type === "multiple-choice" ? "flex flex-col gap-2" : "flex flex-wrap gap-2"}>
+          {choices.map((choice) => (
+            <button
+              key={choice.label}
+              type="button"
+              onClick={() => onChange(choice.value)}
+              className={`px-3 py-1.5 rounded-lg border font-bold text-xs text-left cursor-pointer transition-all ${
+                value === choice.value ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border text-foreground hover:bg-muted"
+              }`}
+              disabled={disabled}
+            >
+              {choice.label}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <Input
+          placeholder="Type answer..."
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="h-8 text-xs"
+          disabled={disabled}
+        />
+      )}
+    </div>
+  );
+}
+
+function TestLoadingState({ error }: { error: string | null }) {
+  return error ? (
+    <p className="text-sm text-destructive">Failed to load this test: {error}. Submit to continue; this module will be marked Not graded.</p>
+  ) : (
+    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      <Loader2 className="h-4 w-4 animate-spin" /> Loading test...
+    </div>
+  );
 }
 
 export default function SimulatorPage() {
@@ -34,10 +151,9 @@ export default function SimulatorPage() {
   // Candidate Details
   const [candidateName, setCandidateName] = useState("Candidate");
   const [candidateId, setCandidateId] = useState("ielts-candidate");
-  const [examAttemptId, setExamAttemptId] = useState<string | null>(null);
+  const [examAttemptId] = useState(createAttemptId);
 
-  // Steps: 'intro' | 'listening' | 'reading' | 'writing' | 'speaking' | 'report'
-  const [step, setStep] = useState<"intro" | "listening" | "reading" | "writing" | "speaking" | "report">("intro");
+  const [step, setStep] = useState<Step>("intro");
 
   // CBT Configuration States
   const [isTimerHidden, setIsTimerHidden] = useState(false);
@@ -47,7 +163,7 @@ export default function SimulatorPage() {
   const [timeLeft, setTimeLeft] = useState(0);
   const [isTimerActive, setIsTimerActive] = useState(false);
 
-  // Subscore variables cached from grading responses
+  // Band scores; null means the module could not be graded
   const [listeningScore, setListeningScore] = useState<number | null>(null);
   const [readingScore, setReadingScore] = useState<number | null>(null);
   const [writingScore, setWritingScore] = useState<number | null>(null);
@@ -55,20 +171,20 @@ export default function SimulatorPage() {
 
   // Loading indicator for processing mid-step grading
   const [isProcessingStep, setIsProcessingStep] = useState(false);
+  const processingRef = useRef(false);
 
   // ----------------------------------------------------
-  // LISTENING MODULE LOCAL STATES
+  // LISTENING & READING MODULE LOCAL STATES
   // ----------------------------------------------------
+  const [listeningTest, setListeningTest] = useState<ListeningTest | null>(null);
+  const [readingTest, setReadingTest] = useState<ReadingTest | null>(null);
+  const [testsError, setTestsError] = useState<string | null>(null);
   const [listeningAnswers, setListeningAnswers] = useState<Record<number, string>>({});
+  const [readingAnswers, setReadingAnswers] = useState<Record<number, string>>({});
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioDuration, setAudioDuration] = useState(0);
   const [audioProgress, setAudioProgress] = useState(0);
-
-  // ----------------------------------------------------
-  // READING MODULE LOCAL STATES
-  // ----------------------------------------------------
-  const [readingAnswers, setReadingAnswers] = useState<Record<number, string>>({});
 
   // ----------------------------------------------------
   // WRITING MODULE LOCAL STATES
@@ -80,17 +196,9 @@ export default function SimulatorPage() {
   // SPEAKING MODULE LOCAL STATES
   // ----------------------------------------------------
   const [transcript, setTranscript] = useState("");
-  const speakingPromptText = "Let's talk about cultural traditions. Do you think it is important for a society to maintain its traditional cultural values in the modern era, and why?";
+  const [speakingPrompt, setSpeakingPrompt] = useState("");
 
   // Auth fetch
-  useEffect(() => {
-    const generatedAttemptId =
-      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-        ? crypto.randomUUID()
-        : `attempt-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    setExamAttemptId(generatedAttemptId);
-  }, []);
-
   useEffect(() => {
     const fetchSession = async () => {
       try {
@@ -114,134 +222,126 @@ export default function SimulatorPage() {
     fetchSession();
   }, [router]);
 
-  // Set timer duration when step changes
   useEffect(() => {
-    if (step === "listening") {
-      setTimeLeft(1800); // 30 mins
-      setIsTimerActive(true);
-    } else if (step === "reading") {
-      setTimeLeft(3600); // 60 mins
-      setIsTimerActive(true);
-    } else if (step === "writing") {
-      setTimeLeft(3600); // 60 mins
-      setIsTimerActive(true);
-    } else if (step === "speaking") {
-      setTimeLeft(720); // 12 mins
-      setIsTimerActive(true);
-    } else {
-      setIsTimerActive(false);
-      setTimeLeft(0);
-    }
-  }, [step]);
+    if (!token) return;
+    const fetchTest = async <T,>(module: "listening" | "reading"): Promise<T> => {
+      const response = await fetch(`${BACKEND_URL}/api/test/${module}/tests`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || `Failed to load ${module} test`);
+      if (!Array.isArray(data) || data.length === 0) throw new Error(`No ${module} tests available`);
+      return data[0] as T;
+    };
+    Promise.all([fetchTest<ListeningTest>("listening"), fetchTest<ReadingTest>("reading")])
+      .then(([listening, reading]) => {
+        setListeningTest(listening);
+        setReadingTest(reading);
+      })
+      .catch((err) => {
+        console.error("[Simulator] Failed to load tests:", err);
+        setTestsError(errorMessage(err));
+      });
+  }, [token]);
 
   // Countdown timer logic
   useEffect(() => {
-    let timer: NodeJS.Timeout | null = null;
-    if (isTimerActive && timeLeft > 0 && !isProcessingStep) {
-      timer = setInterval(() => {
-        setTimeLeft((prev) => {
-          if (prev <= 1) {
-            clearInterval(timer!);
-            setIsTimerActive(false);
-            toast.warning("Time has expired for this module! Submitting automatically...");
-            if (step === "listening") {
-              handleFinishListening();
-            } else if (step === "reading") {
-              handleFinishReading();
-            } else if (step === "writing") {
-              handleFinishWriting();
-            } else if (step === "speaking") {
-              handleFinishSpeaking();
-            }
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
+    if (!isTimerActive || isProcessingStep) return;
+    const timer = setInterval(() => setTimeLeft((prev) => Math.max(0, prev - 1)), 1000);
+    return () => clearInterval(timer);
+  }, [isTimerActive, isProcessingStep]);
+
+  const finishCurrentStepRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    if (isTimerActive && timeLeft === 0) {
+      toast.warning("Time has expired for this module! Submitting automatically...");
+      finishCurrentStepRef.current?.();
     }
-    return () => {
-      if (timer) clearInterval(timer);
-    };
-  }, [isTimerActive, timeLeft, step, isProcessingStep]);
+  }, [isTimerActive, timeLeft]);
 
   // ----------------------------------------------------
   // TRANSITION & GRADING PIPELINES
   // ----------------------------------------------------
+  const goToStep = (next: Step) => {
+    const seconds = STEP_SECONDS[next];
+    setStep(next);
+    setTimeLeft(seconds ?? 0);
+    setIsTimerActive(seconds !== undefined);
+  };
+
   const startSimulation = () => {
-    setStep("listening");
+    goToStep("listening");
+  };
+
+  const beginProcessing = () => {
+    if (processingRef.current) return false;
+    processingRef.current = true;
+    setIsProcessingStep(true);
+    setIsTimerActive(false);
+    return true;
+  };
+
+  const endProcessing = () => {
+    processingRef.current = false;
+    setIsProcessingStep(false);
+  };
+
+  const submitObjectiveTest = async (
+    module: "listening" | "reading",
+    testId: string | undefined,
+    answers: Record<number, string>,
+  ) => {
+    if (!testId) throw new Error(`The ${module} test could not be loaded.`);
+    const response = await fetch(`${BACKEND_URL}/api/test/${module}/submit`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ test_id: testId, answers }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(data?.error || `${module} scoring failed`);
+    if (typeof data?.band_score !== "number") throw new Error("No band score received.");
+    return data.band_score as number;
   };
 
   const handleFinishListening = async () => {
-    if (!token) return;
-    setIsProcessingStep(true);
-    setIsTimerActive(false);
+    if (!token || !beginProcessing()) return;
+    if (audioRef.current) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    }
     try {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        setIsPlaying(false);
-      }
-
-      const response = await fetch(`${BACKEND_URL}/api/test/listening/submit`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          test_id: "listening-1",
-          answers: listeningAnswers,
-        }),
-      });
-
-      if (!response.ok) throw new Error("Listening scoring failed");
-      const resultData = await response.json();
-      setListeningScore(resultData.band_score);
+      setListeningScore(await submitObjectiveTest("listening", listeningTest?.id, listeningAnswers));
       toast.success("Listening portion recorded.");
-      setStep("reading");
-    } catch (err: any) {
-      toast.error("Failed to grade Listening step. Moving forward with estimated 6.0.");
-      setListeningScore(6.0);
-      setStep("reading");
+    } catch (err) {
+      console.error("[Simulator Listening Error]:", err);
+      setListeningScore(null);
+      toast.error(`Listening could not be graded: ${errorMessage(err)}`);
     } finally {
-      setIsProcessingStep(false);
+      goToStep("reading");
+      endProcessing();
     }
   };
 
   const handleFinishReading = async () => {
-    if (!token) return;
-    setIsProcessingStep(true);
-    setIsTimerActive(false);
+    if (!token || !beginProcessing()) return;
     try {
-      const response = await fetch(`${BACKEND_URL}/api/test/reading/submit`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          test_id: "reading-1",
-          answers: readingAnswers,
-        }),
-      });
-
-      if (!response.ok) throw new Error("Reading scoring failed");
-      const resultData = await response.json();
-      setReadingScore(resultData.band_score);
+      setReadingScore(await submitObjectiveTest("reading", readingTest?.id, readingAnswers));
       toast.success("Reading portion recorded.");
-      setStep("writing");
-    } catch (err: any) {
-      toast.error("Failed to grade Reading step. Moving forward with estimated 6.0.");
-      setReadingScore(6.0);
-      setStep("writing");
+    } catch (err) {
+      console.error("[Simulator Reading Error]:", err);
+      setReadingScore(null);
+      toast.error(`Reading could not be graded: ${errorMessage(err)}`);
     } finally {
-      setIsProcessingStep(false);
+      goToStep("writing");
+      endProcessing();
     }
   };
 
   const handleFinishWriting = async () => {
-    if (!token) return;
-    setIsProcessingStep(true);
-    setIsTimerActive(false);
+    if (!token || !beginProcessing()) return;
     try {
       const response = await fetch(`${BACKEND_URL}/api/writing/evaluate`, {
         method: "POST",
@@ -255,66 +355,26 @@ export default function SimulatorPage() {
           essay,
         }),
       });
-
-      if (!response.ok) throw new Error("Writing evaluation failed");
-      if (!response.body) throw new Error("No response body received from stream.");
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let finalBandScore: number | null = null;
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n");
-
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const dataStr = line.slice(6).trim();
-              if (dataStr === "[DONE]") continue;
-
-              const data = JSON.parse(dataStr);
-              if (data.done && data.result) {
-                finalBandScore = Number(data.result.band_score);
-              }
-            } catch (err) {
-              // Ignore partial JSON error
-            }
-          }
-        }
-      }
-
-      if (finalBandScore !== null) {
-        setWritingScore(finalBandScore);
-        toast.success("Writing portion evaluated.");
-      } else {
-        throw new Error("No final band score received.");
-      }
-      setStep("speaking");
-    } catch (err: any) {
+      setWritingScore(await streamBandScore(response));
+      toast.success("Writing portion evaluated.");
+    } catch (err) {
       console.error("[Simulator Writing Evaluation Error]:", err);
-      toast.error("Failed to evaluate Writing step. Moving forward with estimated 6.0.");
-      setWritingScore(6.0);
-      setStep("speaking");
+      setWritingScore(null);
+      toast.error(`Writing could not be graded: ${errorMessage(err)}`);
     } finally {
-      setIsProcessingStep(false);
+      goToStep("speaking");
+      endProcessing();
     }
   };
 
   const handleFinishSpeaking = async (transcriptOverride?: string) => {
-    if (!token) return;
-    const finalTranscript = (transcriptOverride || transcript).trim();
-
-    if (finalTranscript.length < 10) {
-      toast.error("The AI examiner has not received enough speech to grade yet.");
-      return;
-    }
-    setIsProcessingStep(true);
-    setIsTimerActive(false);
+    if (!token || !beginProcessing()) return;
+    const finalTranscript = (transcriptOverride ?? transcript).trim();
     try {
+      if (finalTranscript.length < 10) {
+        throw new Error("the examiner did not receive enough speech to grade.");
+      }
+      if (!speakingPrompt) throw new Error("the speaking session was never started.");
       const response = await fetch(`${BACKEND_URL}/api/speaking/evaluate`, {
         method: "POST",
         headers: {
@@ -323,69 +383,40 @@ export default function SimulatorPage() {
         },
         body: JSON.stringify({
           part: 3,
-          prompt: speakingPromptText,
+          prompt: speakingPrompt,
           transcript: finalTranscript,
         }),
       });
-
-      if (!response.ok) throw new Error("Speaking evaluation failed");
-      if (!response.body) throw new Error("No response body received from stream.");
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let finalBandScore: number | null = null;
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n");
-
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const dataStr = line.slice(6).trim();
-              if (dataStr === "[DONE]") continue;
-
-              const data = JSON.parse(dataStr);
-              if (data.done && data.result) {
-                finalBandScore = Number(data.result.band_score);
-              }
-            } catch (err) {
-              // Ignore partial JSON error
-            }
-          }
-        }
-      }
-
-      if (finalBandScore !== null) {
-        setSpeakingScore(finalBandScore);
-        toast.success("Speaking portion graded. Simulation complete!");
-      } else {
-        throw new Error("No final band score received.");
-      }
-      setStep("report");
-      syncStudyRoadmap();
-    } catch (err: any) {
+      setSpeakingScore(await streamBandScore(response));
+      toast.success("Speaking portion graded. Simulation complete!");
+    } catch (err) {
       console.error("[Simulator Speaking Evaluation Error]:", err);
-      toast.error("Failed to grade Speaking step. Finishing simulation.");
-      setSpeakingScore(6.5);
-      setStep("report");
-      syncStudyRoadmap();
+      setSpeakingScore(null);
+      toast.error(`Speaking could not be graded: ${errorMessage(err)}`);
     } finally {
-      setIsProcessingStep(false);
+      goToStep("report");
+      endProcessing();
     }
   };
 
+  // Always points at the current step's finish handler so timer expiry never uses stale state
+  useEffect(() => {
+    finishCurrentStepRef.current =
+      step === "listening" ? handleFinishListening
+        : step === "reading" ? handleFinishReading
+          : step === "writing" ? handleFinishWriting
+            : step === "speaking" ? () => handleFinishSpeaking()
+              : null;
+  });
+
   const toggleListeningPlay = () => {
-    if (!audioRef.current) return;
+    const audio = audioRef.current;
+    if (!audio) return;
     if (isPlaying) {
-      audioRef.current.pause();
+      audio.pause();
       setIsPlaying(false);
     } else {
-      audioRef.current.play();
-      setIsPlaying(true);
+      audio.play().then(() => setIsPlaying(true)).catch(() => toast.error("Unable to play the audio."));
     }
   };
 
@@ -401,23 +432,17 @@ export default function SimulatorPage() {
     return "text-sm";
   };
 
-  const syncStudyRoadmap = async () => {
-    if (!token) return;
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/planner/generate`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-      });
-      if (res.ok) {
-        toast.success("AI has automatically recalculated your study plan milestones based on these scores!");
-      }
-    } catch (err) {
-      console.error("Auto-sync roadmap failed:", err);
-    }
-  };
+  const moduleScores = [
+    { module: "Listening", score: listeningScore },
+    { module: "Reading", score: readingScore },
+    { module: "Writing", score: writingScore },
+    { module: "Speaking", score: speakingScore },
+  ];
+  const gradedModules = moduleScores.filter(
+    (item): item is { module: string; score: number } => item.score !== null,
+  );
+  const overallScore =
+    gradedModules.length > 0 ? calculateOverallIELTS(gradedModules.map((item) => item.score)) : null;
 
   const handleDownloadTRF = () => {
     const printWindow = window.open("", "_blank", "width=850,height=900");
@@ -432,7 +457,8 @@ export default function SimulatorPage() {
       day: "numeric",
     });
 
-    const cefrLevel = (score: number) => {
+    const cefrLevel = (score: number | null) => {
+      if (score === null) return "—";
       if (score >= 8.5) return "C2";
       if (score >= 7.0) return "C1";
       if (score >= 5.5) return "B2";
@@ -440,13 +466,23 @@ export default function SimulatorPage() {
       return "A2";
     };
 
-    const overall = overallScore !== null ? overallScore : 6.0;
+    const name = escapeHtml(candidateName);
+    const overall = overallScore !== null ? overallScore.toFixed(1) : "—";
+    const weakest = [...gradedModules].sort((a, b) => a.score - b.score)[0];
+    const securityCode = (examAttemptId ?? "").replace(/[^a-zA-Z0-9]/g, "").slice(0, 6).toUpperCase();
+    const ungradedNote =
+      gradedModules.length < moduleScores.length
+        ? ` Modules marked "Not graded" could not be assessed and are excluded from the overall band.`
+        : "";
+    const summary = weakest
+      ? `Candidate ${name} achieved an overall Band score of ${overall}.${ungradedNote} Based on diagnostic subscores, key improvement areas remain in ${weakest.module} module practice. Prioritizing structured grammar feedback, expanding lexical resource variety, and sitting simulated exams under strict countdown constraints will assist in securing a target score of Band 7.5+.`
+      : `No module could be graded in this attempt, so no band score is reported. Please retake the simulation.`;
 
     const trfHtml = `
       <!DOCTYPE html>
       <html>
         <head>
-          <title>IELTS Test Report Form - ${candidateName}</title>
+          <title>IELTS Test Report Form - ${name}</title>
           <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800;900&family=Courier+Prime&display=swap" rel="stylesheet">
           <script src="https://cdn.tailwindcss.com"></script>
           <style>
@@ -529,7 +565,7 @@ export default function SimulatorPage() {
               <div class="md:col-span-9 grid grid-cols-2 gap-y-4 gap-x-6 text-sm border-l border-stone-100 pl-0 md:pl-8">
                 <div>
                   <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Candidate Name</span>
-                  <span class="font-extrabold text-slate-800 capitalize text-base">${candidateName}</span>
+                  <span class="font-extrabold text-slate-800 capitalize text-base">${name}</span>
                 </div>
                 <div>
                   <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Candidate Number</span>
@@ -549,7 +585,7 @@ export default function SimulatorPage() {
                 </div>
                 <div>
                   <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">CEFR Level Equivalency</span>
-                  <span class="font-bold text-blue-900">${cefrLevel(overall)}</span>
+                  <span class="font-bold text-blue-900">${cefrLevel(overallScore)}</span>
                 </div>
               </div>
             </div>
@@ -568,11 +604,11 @@ export default function SimulatorPage() {
                 </thead>
                 <tbody>
                   <tr class="font-extrabold text-slate-800 text-base">
-                    <td class="py-4 px-4 font-mono">${listeningScore !== null ? listeningScore.toFixed(1) : "N/A"}</td>
-                    <td class="py-4 px-4 border-l border-slate-200 font-mono">${readingScore !== null ? readingScore.toFixed(1) : "N/A"}</td>
-                    <td class="py-4 px-4 border-l border-slate-200 font-mono">${writingScore !== null ? writingScore.toFixed(1) : "N/A"}</td>
-                    <td class="py-4 px-4 border-l border-slate-200 font-mono">${speakingScore !== null ? speakingScore.toFixed(1) : "N/A"}</td>
-                    <td class="py-4 px-4 border-l border-slate-200 bg-amber-500/10 text-xl font-black text-blue-950 font-mono">${overall.toFixed(1)}</td>
+                    <td class="py-4 px-4 font-mono">${formatBand(listeningScore)}</td>
+                    <td class="py-4 px-4 border-l border-slate-200 font-mono">${formatBand(readingScore)}</td>
+                    <td class="py-4 px-4 border-l border-slate-200 font-mono">${formatBand(writingScore)}</td>
+                    <td class="py-4 px-4 border-l border-slate-200 font-mono">${formatBand(speakingScore)}</td>
+                    <td class="py-4 px-4 border-l border-slate-200 bg-amber-500/10 text-xl font-black text-blue-950 font-mono">${overall}</td>
                   </tr>
                 </tbody>
               </table>
@@ -584,15 +620,7 @@ export default function SimulatorPage() {
                 <span>🌟</span> AI Coach Recommendations & Strategy
               </h3>
               <p class="text-xs text-slate-600 leading-relaxed font-medium">
-                Candidate ${candidateName} achieved a Band score of ${overall.toFixed(1)}. 
-                Based on diagnostic subscores, key improvement areas remain in ${
-                  [
-                    { name: "Listening", val: listeningScore || 6.0 },
-                    { name: "Reading", val: readingScore || 6.0 },
-                    { name: "Writing", val: writingScore || 6.0 },
-                    { name: "Speaking", val: speakingScore || 6.0 },
-                  ].sort((a, b) => a.val - b.val)[0]?.name
-                } module practice. Prioritizing structured grammar feedback, expanding lexical resource variety, and sitting simulated exams under strict countdown constraints will assist in securing a target score of Band 7.5+.
+                ${summary}
               </p>
             </div>
 
@@ -618,7 +646,7 @@ export default function SimulatorPage() {
 
             <!-- Document Footer -->
             <div class="mt-8 pt-4 border-t border-stone-100 flex justify-between text-[8px] text-slate-400 font-mono">
-              <span>Security Code: IELTS-AI-${Math.random().toString(36).substring(2, 8).toUpperCase()}</span>
+              <span>Security Code: IELTS-AI-${securityCode}</span>
               <span>This is an AI-generated mock exam record for training purposes.</span>
             </div>
           </div>
@@ -641,19 +669,11 @@ export default function SimulatorPage() {
     );
   }
 
-  const overallScore =
-    listeningScore !== null &&
-    readingScore !== null &&
-    writingScore !== null &&
-    speakingScore !== null
-      ? calculateOverallIELTS([listeningScore, readingScore, writingScore, speakingScore])
-      : null;
-
   return (
     <div className="min-h-screen bg-muted/20 flex flex-col justify-between" style={{
       "--scrollbar-thumb": "rgba(100, 116, 139, 0.4)",
       "--scrollbar-track": "rgba(241, 245, 249, 0.5)"
-    } as any}>
+    } as CSSProperties}>
       {/* Dynamic Voice Pulse style */}
       <style>{`
         @keyframes speak-pulse {
@@ -800,68 +820,69 @@ export default function SimulatorPage() {
                 <div className="flex justify-between items-center">
                   <div>
                     <CardTitle className="text-lg font-bold">Step 1: Listening Module</CardTitle>
-                    <CardDescription>Listen to the library orientation audio and type answers in the blanks.</CardDescription>
+                    <CardDescription>
+                      {listeningTest?.sections[0]?.instructions ?? "Listen to the audio and answer the questions."}
+                    </CardDescription>
                   </div>
                   <span className="text-xs font-mono font-bold text-muted-foreground bg-muted border px-2 py-0.5 rounded-sm">Part 1</span>
                 </div>
               </CardHeader>
               <CardContent className="p-6 space-y-6">
-                <audio
-                  ref={audioRef}
-                  src="/audio/listening-test-1.mp3"
-                  onTimeUpdate={() => setAudioProgress(audioRef.current?.currentTime || 0)}
-                  onLoadedMetadata={() => setAudioDuration(audioRef.current?.duration || 0)}
-                />
-                
-                <div className="flex items-center gap-4 border border-muted/40 p-4 rounded-xl bg-muted/10">
-                  <Button
-                    onClick={toggleListeningPlay}
-                    size="icon"
-                    className="h-10 w-10 rounded-full"
-                    disabled={isProcessingStep}
-                  >
-                    {isPlaying ? <Pause className="h-4 w-4 fill-current" /> : <Play className="h-4 w-4 fill-current ml-0.5" />}
-                  </Button>
-                  <div className="flex-1 space-y-0.5">
-                    <div className="text-xs font-bold text-primary">University Library Orientation Audio</div>
-                    <input
-                      type="range"
-                      min="0"
-                      max={audioDuration || 100}
-                      value={audioProgress}
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value);
-                        if (audioRef.current) audioRef.current.currentTime = val;
-                        setAudioProgress(val);
-                      }}
-                      className="w-full h-1 bg-muted rounded appearance-none accent-primary cursor-pointer"
-                      disabled={isProcessingStep}
+                {listeningTest ? (
+                  <>
+                    <audio
+                      ref={audioRef}
+                      src={listeningTest.sections[0]?.audioUrl}
+                      onTimeUpdate={() => setAudioProgress(audioRef.current?.currentTime || 0)}
+                      onLoadedMetadata={() => setAudioDuration(audioRef.current?.duration || 0)}
+                      onEnded={() => setIsPlaying(false)}
                     />
-                  </div>
-                </div>
 
-                {/* Questions */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {[
-                    { id: 1, label: "The library was established in _____." },
-                    { id: 3, label: "Students can borrow a maximum of _____ books." },
-                    { id: 5, label: "The library closes at _____ PM on weekends." }
-                  ].map((q) => (
-                    <div key={q.id} className="p-3 border border-muted/50 rounded-xl space-y-2 bg-background">
-                      <div className="text-xs font-bold text-muted-foreground">Question {q.id}</div>
-                      <p className={`${getTextSizeClass()} font-semibold leading-normal text-foreground`}>{q.label}</p>
-                      <Input
-                        placeholder="Type answer..."
-                        value={listeningAnswers[q.id] || ""}
-                        onChange={(e) => setListeningAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
-                        className="h-8 text-xs"
+                    <div className="flex items-center gap-4 border border-muted/40 p-4 rounded-xl bg-muted/10">
+                      <Button
+                        onClick={toggleListeningPlay}
+                        size="icon"
+                        className="h-10 w-10 rounded-full"
                         disabled={isProcessingStep}
-                      />
+                      >
+                        {isPlaying ? <Pause className="h-4 w-4 fill-current" /> : <Play className="h-4 w-4 fill-current ml-0.5" />}
+                      </Button>
+                      <div className="flex-1 space-y-0.5">
+                        <div className="text-xs font-bold text-primary">{listeningTest.title}</div>
+                        <input
+                          type="range"
+                          min="0"
+                          max={audioDuration || 100}
+                          value={audioProgress}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            if (audioRef.current) audioRef.current.currentTime = val;
+                            setAudioProgress(val);
+                          }}
+                          className="w-full h-1 bg-muted rounded appearance-none accent-primary cursor-pointer"
+                          disabled={isProcessingStep}
+                        />
+                      </div>
                     </div>
-                  ))}
-                </div>
 
-                <Button onClick={handleFinishListening} className="w-full h-11" disabled={isProcessingStep}>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {listeningTest.sections.flatMap((section) => section.questions).map((q) => (
+                        <QuestionField
+                          key={q.id}
+                          question={q}
+                          value={listeningAnswers[q.id] || ""}
+                          onChange={(value) => setListeningAnswers((prev) => ({ ...prev, [q.id]: value }))}
+                          disabled={isProcessingStep}
+                          textSizeClass={getTextSizeClass()}
+                        />
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <TestLoadingState error={testsError} />
+                )}
+
+                <Button onClick={handleFinishListening} className="w-full h-11" disabled={isProcessingStep || (!listeningTest && !testsError)}>
                   {isProcessingStep ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit & Continue to Reading"}
                 </Button>
               </CardContent>
@@ -878,15 +899,21 @@ export default function SimulatorPage() {
               scrollbarWidth: "thin"
             }}>
               <div className="max-w-2xl mx-auto space-y-6">
-                <h1 className="text-xl font-bold flex items-center gap-2">
-                  <BookOpen className="h-5 w-5 text-primary" />
-                  Passage: AI in Education
-                </h1>
-                <p className={`${getTextSizeClass()} text-foreground/90 leading-relaxed font-sans whitespace-pre-wrap select-text antialiased`}>
-                  Artificial Intelligence (AI) is rapidly transforming educational systems worldwide. From personalized tutoring software that adapts to a student's learning pace to automated grading systems, AI integration aims to optimize pedagogical efficiency. 
-                  Proponents argue that intelligent tutoring systems allow educators to commit more energy to mentoring and emotional guidance. For example, AI algorithms can analyze a student's performance in real time, detecting conceptual weaknesses and generating targeted remedial exercises. 
-                  However, critics express concern over privacy, data security, and the danger of replacing human teachers with rigid algorithms. They emphasize that critical thinking, empathy, and social cooperation are inherently human traits that cannot be programmed.
-                </p>
+                {readingTest ? (
+                  readingTest.passages.map((passage) => (
+                    <div key={passage.id} className="space-y-4">
+                      <h1 className="text-xl font-bold flex items-center gap-2">
+                        <BookOpen className="h-5 w-5 text-primary" />
+                        {passage.title}
+                      </h1>
+                      <p className={`${getTextSizeClass()} text-foreground/90 leading-relaxed font-sans whitespace-pre-wrap select-text antialiased`}>
+                        {passage.text}
+                      </p>
+                    </div>
+                  ))
+                ) : (
+                  <TestLoadingState error={testsError} />
+                )}
               </div>
             </div>
 
@@ -897,42 +924,25 @@ export default function SimulatorPage() {
             }}>
               <div className="space-y-6">
                 <div>
-                  <h2 className="text-lg font-bold">Answer Questions 2 & 3</h2>
-                  <p className="text-xs text-muted-foreground mt-0.5">Select TRUE or FALSE based on the passage text.</p>
+                  <h2 className="text-lg font-bold">Answer All Questions</h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">Answer each question based on the passage text.</p>
                 </div>
 
                 <div className="space-y-4">
-                  {[
-                    { id: 2, text: "Personalized tutoring software adapts to student performance in real time." },
-                    { id: 3, text: "Data privacy is a minor issue for critics of classroom AI implementation." }
-                  ].map((q) => (
-                    <div key={q.id} className="p-4 border border-muted/50 bg-background rounded-xl space-y-3 shadow-xs">
-                      <div className="text-[10px] font-bold text-muted-foreground uppercase font-mono">Question {q.id}</div>
-                      <p className={`${getTextSizeClass()} font-semibold leading-normal text-foreground`}>{q.text}</p>
-                      <div className="flex gap-2">
-                        {["TRUE", "FALSE"].map(opt => {
-                          const isSel = readingAnswers[q.id] === opt;
-                          return (
-                            <button
-                              key={opt}
-                              type="button"
-                              onClick={() => setReadingAnswers(prev => ({ ...prev, [q.id]: opt }))}
-                              className={`px-3 py-1.5 rounded-lg border font-bold text-xs cursor-pointer transition-all ${
-                                isSel ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border text-foreground hover:bg-muted"
-                              }`}
-                              disabled={isProcessingStep}
-                            >
-                              {opt}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
+                  {readingTest?.passages.flatMap((passage) => passage.questions).map((q) => (
+                    <QuestionField
+                      key={q.id}
+                      question={q}
+                      value={readingAnswers[q.id] || ""}
+                      onChange={(value) => setReadingAnswers((prev) => ({ ...prev, [q.id]: value }))}
+                      disabled={isProcessingStep}
+                      textSizeClass={getTextSizeClass()}
+                    />
                   ))}
                 </div>
               </div>
 
-              <Button onClick={handleFinishReading} className="w-full h-11 mt-8" disabled={isProcessingStep}>
+              <Button onClick={handleFinishReading} className="w-full h-11 mt-8" disabled={isProcessingStep || (!readingTest && !testsError)}>
                 {isProcessingStep ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit & Continue to Writing"}
               </Button>
             </div>
@@ -956,7 +966,7 @@ export default function SimulatorPage() {
                   <p className="text-xs text-muted-foreground mt-1">Write an essay in response to the topic below (minimum 250 words).</p>
                 </div>
                 <div className={`${getTextSizeClass()} rounded-xl border border-muted/80 bg-muted/10 p-5 font-bold leading-relaxed text-foreground select-text`}>
-                  "{writingPrompt}"
+                  &ldquo;{writingPrompt}&rdquo;
                 </div>
               </div>
             </div>
@@ -998,14 +1008,14 @@ export default function SimulatorPage() {
             authToken={token}
             attemptId={examAttemptId}
             candidateName={candidateName}
-            prompt={speakingPromptText}
+            onPromptChange={setSpeakingPrompt}
             onTranscriptChange={setTranscript}
             onComplete={handleFinishSpeaking}
           />
         )}
 
         {/* STEP 6: CONSOLIDATED REPORT */}
-        {step === "report" && overallScore !== null && (
+        {step === "report" && (
           <div className="w-full max-w-4xl p-6 md:p-12 overflow-y-auto">
             <Card className="shadow-md border-muted/50 overflow-hidden">
               <div className="bg-primary/5 border-b border-primary/10 py-6 text-center space-y-2">
@@ -1018,7 +1028,7 @@ export default function SimulatorPage() {
                   <div className="relative flex h-28 w-28 items-center justify-center rounded-full border-4 border-primary/10 bg-primary/5 shadow-xs">
                     <div className="text-center">
                       <span className="text-4xl font-black text-primary font-mono block leading-none">
-                        {overallScore.toFixed(1)}
+                        {overallScore !== null ? overallScore.toFixed(1) : "—"}
                       </span>
                       <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mt-1 block">
                         Band
@@ -1027,22 +1037,21 @@ export default function SimulatorPage() {
                   </div>
                   <h3 className="font-extrabold text-lg text-foreground">Estimated IELTS Score</h3>
                   <p className="text-xs text-muted-foreground text-center max-w-sm">
-                    This represents your mock level. Focus on your weaker subsections in writing/speaking to push this average to 8.0+.
+                    {overallScore === null
+                      ? "No module could be graded in this attempt, so no band score is reported."
+                      : gradedModules.length < moduleScores.length
+                        ? "Calculated from graded modules only. Modules marked Not graded could not be assessed."
+                        : "This represents your mock level. Focus on your weaker subsections in writing/speaking to push this average to 8.0+."}
                   </p>
                 </div>
 
                 {/* subscores */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  {[
-                    { module: "Listening", score: listeningScore },
-                    { module: "Reading", score: readingScore },
-                    { module: "Writing", score: writingScore },
-                    { module: "Speaking", score: speakingScore },
-                  ].map((item, idx) => (
+                  {moduleScores.map((item, idx) => (
                     <div key={idx} className="p-4 rounded-xl border border-muted/50 bg-background text-center space-y-1.5 shadow-xs">
                       <div className="text-xs font-bold text-muted-foreground">{item.module}</div>
                       <div className="text-xl font-black font-mono text-primary">
-                        Band {item.score !== null ? item.score.toFixed(1) : "N/A"}
+                        {item.score !== null ? `Band ${item.score.toFixed(1)}` : "Not graded"}
                       </div>
                     </div>
                   ))}

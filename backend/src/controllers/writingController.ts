@@ -1,7 +1,8 @@
 import { Response } from "express";
 import { AuthenticatedRequest } from "../middleware/authMiddleware";
 import { supabase } from "../services/supabaseClient";
-import { OpenRouterService, ChatMessage } from "../services/openrouter";
+import { ChatMessage } from "../services/openrouter";
+import { streamJsonEvaluation } from "../utils/sse";
 import { z } from "zod";
 
 const evaluateSchema = z.object({
@@ -16,7 +17,7 @@ export class WritingController {
       // 1. Validate request body
       const parsed = evaluateSchema.safeParse(req.body);
       if (!parsed.success) {
-        res.status(400).json({ error: parsed.error.format() });
+        res.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid request" });
         return;
       }
 
@@ -82,101 +83,35 @@ STUDENT'S ESSAY:
         { role: "user", content: userContent },
       ];
 
-      // Set headers for Server-Sent Events (SSE)
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("Connection", "keep-alive");
-      res.flushHeaders(); // Establish connection
-
-      let assistantResponse = "";
-
-      await OpenRouterService.streamCompletion(
-        messages,
-        (token) => {
-          assistantResponse += token;
-          // Send SSE formatted data token
-          res.write(`data: ${JSON.stringify({ token })}\n\n`);
-        },
-        async () => {
-          try {
-            // Parse the full accumulated JSON response
-            let cleanText = assistantResponse.trim();
-            if (cleanText.startsWith("```json")) {
-              cleanText = cleanText.substring(7);
-            }
-            if (cleanText.endsWith("```")) {
-              cleanText = cleanText.substring(0, cleanText.length - 3);
-            }
-            const resultJSON = JSON.parse(cleanText.trim());
-
-            // Store evaluation results in public.writing_submissions
-            const { data: dbRecord, error: dbErr } = await supabase
-              .from("writing_submissions")
-              .insert({
-                user_id,
-                task_type,
-                prompt,
-                essay,
-                band_score: resultJSON.band_score,
-                task_response: resultJSON.task_response,
-                coherence_cohesion: resultJSON.coherence_cohesion,
-                lexical_resource: resultJSON.lexical_resource,
-                grammatical_range_accuracy: resultJSON.grammar_accuracy,
-                feedback_json: {
-                  corrections: resultJSON.corrections || [],
-                  vocabulary_suggestions: resultJSON.vocabulary_suggestions || [],
-                  improved_essay: resultJSON.improved_essay || "",
-                  improvements: resultJSON.improvements || [],
-                },
-              })
-              .select()
-              .single();
-
-            if (dbErr) {
-              console.error("[DB Store Error for Writing Submission]:", dbErr);
-            }
-
-            // Send SSE done signal containing the dbRecord id and parsed JSON
-            res.write(`data: ${JSON.stringify({ done: true, id: dbRecord?.id, result: resultJSON })}\n\n`);
-          } catch (parseErr) {
-            console.error("[Writing Evaluation Parse/Store Error] Raw text:", assistantResponse, parseErr);
-            res.write(`data: ${JSON.stringify({ error: "AI returned an invalid JSON response structure." })}\n\n`);
-          } finally {
-            res.write("data: [DONE]\n\n");
-            res.end();
-          }
-        },
-        (error) => {
-          console.error("[Writing Streaming Error]:", error);
-          res.write(`data: ${JSON.stringify({ error: error.message || "Failed to stream message" })}\n\n`);
-          res.end();
-        },
-        "openai/gpt-oss-20b:free"
-      );
+      await streamJsonEvaluation<any>(res, messages, async (result) => {
+        const { data, error } = await supabase
+          .from("writing_submissions")
+          .insert({
+            user_id,
+            task_type,
+            prompt,
+            essay,
+            band_score: result.band_score,
+            task_response: result.task_response,
+            coherence_cohesion: result.coherence_cohesion,
+            lexical_resource: result.lexical_resource,
+            grammatical_range_accuracy: result.grammar_accuracy,
+            feedback_json: {
+              corrections: result.corrections || [],
+              vocabulary_suggestions: result.vocabulary_suggestions || [],
+              improved_essay: result.improved_essay || "",
+              improvements: result.improvements || [],
+            },
+          })
+          .select("id")
+          .single();
+        if (error) throw error;
+        return data.id;
+      });
     } catch (error: any) {
       console.error("[Writing Evaluation Router Error]:", error);
-      res.status(500).json({ error: error.message || "Internal server error" });
+      if (!res.headersSent) res.status(500).json({ error: error.message || "Internal server error" });
     }
   }
 
-  /**
-   * Get user's past writing submissions.
-   */
-  static async getSubmissions(req: AuthenticatedRequest, res: Response): Promise<void> {
-    try {
-      const user_id = req.user.id;
-      const { data, error } = await supabase
-        .from("writing_submissions")
-        .select("*")
-        .eq("user_id", user_id)
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-
-      res.status(200).json(data);
-    } catch (error: any) {
-      console.error("[Get Submissions Error]:", error);
-      res.status(500).json({ error: error.message || "Failed to fetch submissions" });
-    }
-  }
 }

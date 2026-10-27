@@ -1,7 +1,8 @@
 import { Response } from "express";
 import { AuthenticatedRequest } from "../middleware/authMiddleware";
 import { supabase } from "../services/supabaseClient";
-import { OpenRouterService, ChatMessage } from "../services/openrouter";
+import { ChatMessage, streamCompletion } from "../services/openrouter";
+import { sendSse, startSse } from "../utils/sse";
 
 export class ChatController {
   /**
@@ -170,11 +171,7 @@ export class ChatController {
       });
       if (saveUserErr) throw saveUserErr;
 
-      // Set headers for Server-Sent Events (SSE)
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("Connection", "keep-alive");
-      res.flushHeaders(); // Establish connection
+      startSse(res);
 
       // 4. Construct prompt context
       const systemPrompt = `You are a helpful and experienced IELTS AI Mentor. Your task is to assist students in preparing for their IELTS exam.
@@ -190,52 +187,33 @@ Always be encouraging, professional, and clear. Align your guidance with officia
         { role: "user", content: message },
       ];
 
-      // Stream completion
-      let assistantResponse = "";
+      try {
+        const reply = await streamCompletion(apiMessages, (token) => sendSse(res, { token }));
 
-      await OpenRouterService.streamCompletion(
-        apiMessages,
-        (token) => {
-          assistantResponse += token;
-          // Send SSE formatted data token
-          res.write(`data: ${JSON.stringify({ token })}\n\n`);
-        },
-        async () => {
-          // On stream end, save response in background
-          try {
-            await supabase.from("chat_messages").insert({
-              session_id,
-              role: "assistant",
-              content: assistantResponse,
-            });
+        const { error: saveErr } = await supabase.from("chat_messages").insert({
+          session_id,
+          role: "assistant",
+          content: reply,
+        });
+        if (saveErr) throw saveErr;
 
-            // Update session updated_at timestamp
-            await supabase
-              .from("chat_sessions")
-              .update({ updated_at: new Date().toISOString() })
-              .eq("id", session_id);
-
-            // Auto-rename chat title if it is "New Chat" and this is the first message exchange
-            if (session.title === "New Chat" && (!history || history.length === 0)) {
-              const cleanedTitle =
-                message.length > 25 ? message.slice(0, 25).trim() + "..." : message;
-              await supabase
-                .from("chat_sessions")
-                .update({ title: cleanedTitle })
-                .eq("id", session_id);
-            }
-          } catch (saveErr) {
-            console.error("[Error saving assistant message]:", saveErr);
-          }
-          res.write("data: [DONE]\n\n");
-          res.end();
-        },
-        (error) => {
-          console.error("[Streaming Error]:", error);
-          res.write(`data: ${JSON.stringify({ error: "Failed to stream message" })}\n\n`);
-          res.end();
-        }
-      );
+        // Name the chat after its first message; always bump updated_at for sidebar ordering.
+        const isFirstExchange = session.title === "New Chat" && (!history || history.length === 0);
+        await supabase
+          .from("chat_sessions")
+          .update({
+            updated_at: new Date().toISOString(),
+            ...(isFirstExchange && {
+              title: message.length > 25 ? message.slice(0, 25).trim() + "..." : message,
+            }),
+          })
+          .eq("id", session_id);
+      } catch (streamErr: any) {
+        console.error("[Streaming Error]:", streamErr);
+        sendSse(res, { error: "Failed to generate a reply. Please try again." });
+      }
+      sendSse(res, "[DONE]");
+      res.end();
     } catch (error: any) {
       console.error("[Stream Message Router Error]:", error);
       if (!res.headersSent) {

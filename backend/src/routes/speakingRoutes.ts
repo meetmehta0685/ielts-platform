@@ -4,11 +4,11 @@ import { SpeakingController } from "../controllers/speakingController";
 import { requireAuth } from "../middleware/authMiddleware";
 
 const router = Router();
-const upload = multer({ storage: multer.memoryStorage() });
+// Whisper accepts up to 25 MB per file.
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
 router.post("/transcribe", requireAuth, upload.single("audio"), SpeakingController.transcribeAudio);
 router.post("/evaluate", requireAuth, SpeakingController.evaluateSpeaking);
 router.post("/synthesize", requireAuth, SpeakingController.synthesizeText);
-router.get("/history", requireAuth, SpeakingController.getSubmissions);
 
 export default router;

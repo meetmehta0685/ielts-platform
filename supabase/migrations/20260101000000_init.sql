@@ -1,5 +1,4 @@
--- Unified SQL Script for IELTS AI Mentor Database Schema (Supabase PostgreSQL)
--- Executing this script in the Supabase SQL Editor configures the complete DB.
+-- IELTS AI Mentor schema. Applied by `supabase db reset` locally or `supabase db push` remotely.
 
 -- =========================================================================
 -- 1. PROFILES TABLE (User Onboarding & Metrics)
@@ -226,13 +225,11 @@ CREATE POLICY "Users can insert their own listening attempts"
 -- =========================================================================
 CREATE TABLE IF NOT EXISTS public.study_plans (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
     plan_json JSONB NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
-
-CREATE INDEX IF NOT EXISTS idx_study_plans_user_id ON public.study_plans(user_id);
 
 ALTER TABLE public.study_plans ENABLE ROW LEVEL SECURITY;
 

@@ -18,18 +18,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-
-interface RecordItem {
-  id: string;
-  module: string;
-  title: string;
-  score: string;
-  rawScore: string | null;
-  date: string;
-}
+import type { TrackRecordEntry } from "@/lib/track-record";
 
 interface RecordsListProps {
-  initialRecords: RecordItem[];
+  initialRecords: TrackRecordEntry[];
 }
 
 export function RecordsList({ initialRecords }: RecordsListProps) {
@@ -89,7 +81,7 @@ export function RecordsList({ initialRecords }: RecordsListProps) {
             const val = parseFloat(scoreStr.replace("Band ", ""));
             return isNaN(val) ? 0 : val;
           }
-          return 0; // "Pending Evaluation" gets 0
+          return 0; // "Not graded" gets 0
         };
         const valA = getVal(a.score);
         const valB = getVal(b.score);

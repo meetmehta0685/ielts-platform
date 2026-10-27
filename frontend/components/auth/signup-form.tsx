@@ -62,40 +62,20 @@ export function SignupForm() {
           data: {
             full_name: values.fullName,
           },
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
         },
       });
 
       if (error) throw error;
 
-      console.log("Signup result:", {
-        user: data.user?.id,
-        session: data.session ? "Active" : "None",
-      });
-
-      const user = data.user;
-      if (!user) {
-        throw new Error("Signup succeeded but no user was returned.");
-      }
-
-      // 2. Create the user's profile in the profiles database table (safely upserting)
-      try {
-        const { error: profileError } = await supabase
-          .from("profiles")
-          .upsert({
-            id: user.id,
-            full_name: values.fullName,
-          });
-
-        if (profileError) {
-          console.warn("Profile creation warning (this is fine if database triggers handled it):", profileError.message);
-        }
-      } catch (err: unknown) {
-        console.warn("Client-side profile creation failed, relying on DB trigger:", err);
+      // The profile row is created by the on_auth_user_created database trigger.
+      if (!data.session) {
+        toast.success("Account created! Check your email to confirm your address, then log in.");
+        router.push("/auth/login");
+        return;
       }
 
       toast.success("Account created successfully!");
-      
-      // 3. Redirect user to complete-profile page
       router.push("/complete-profile");
       router.refresh();
     } catch (error: unknown) {

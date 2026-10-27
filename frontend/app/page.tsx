@@ -19,7 +19,6 @@ import {
   Users,
   Award,
   ShieldCheck,
-  Mail,
   Play,
   Pause,
   RotateCcw,
@@ -66,8 +65,6 @@ export default function Home() {
   const [activeModule, setActiveModule] = useState<"speaking" | "writing" | "reading" | "listening">("speaking");
   
   // Lead capture form
-  const [email, setEmail] = useState("");
-  const [isSubmitted, setIsSubmitted] = useState(false);
 
   // Load session on mount
   useEffect(() => {
@@ -104,13 +101,6 @@ export default function Home() {
 
     return () => subscription.unsubscribe();
   }, []);
-
-  const handleEmailSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (email.trim() && email.includes("@")) {
-      setIsSubmitted(true);
-    }
-  };
 
   // Scroll position state for hero parallax
   const [scrollY, setScrollY] = useState(0);
@@ -991,37 +981,12 @@ export default function Home() {
               Join thousands of candidates who built study confidence, resolved core grammatical gaps, and prepared effectively.
             </p>
 
-            {isSubmitted ? (
-              <div className="max-w-md mx-auto bg-blue-900/30 border border-blue-900/60 p-6 rounded-2xl text-center shadow-lg animate-message-appear">
-                <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto mb-3">
-                  <Check className="w-5 h-5 stroke-[2.5px]" />
-                </div>
-                <h4 className="text-base font-bold text-white mb-1">Check your inbox!</h4>
-                <p className="text-xs text-stone-300 leading-normal font-medium">
-                  We&apos;ve sent a 10% discount study voucher and guide link. Let&apos;s begin the roadmap!
-                </p>
-              </div>
-            ) : (
-              <form onSubmit={handleEmailSubmit} className="max-w-md mx-auto flex flex-col sm:flex-row gap-3">
-                <div className="relative flex-1">
-                  <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                  <input
-                    type="email"
-                    required
-                    placeholder="Enter your email address"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full bg-[#111c3a] border border-blue-900 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 rounded-xl py-3.5 pl-11 pr-4 text-sm text-white placeholder-slate-500 focus:outline-none transition-all"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  className="bg-amber-500 hover:bg-amber-600 text-blue-950 font-extrabold text-sm px-6 py-3.5 rounded-xl transition-all duration-300 hover:scale-105 hover:shadow-[0_0_20px_rgba(245,158,11,0.45)] hover:-translate-y-0.5 active:scale-95 whitespace-nowrap"
-                >
-                  Start Preparing Free
-                </button>
-              </form>
-            )}
+            <Link
+              href={currentUser ? "/dashboard" : "/auth/signup"}
+              className="inline-block bg-amber-500 hover:bg-amber-600 text-blue-950 font-extrabold text-sm px-8 py-3.5 rounded-xl transition-all duration-300 hover:scale-105 hover:shadow-[0_0_20px_rgba(245,158,11,0.45)] hover:-translate-y-0.5 active:scale-95"
+            >
+              Start Preparing Free
+            </Link>
 
             <p className="text-[11px] text-slate-400 mt-6 font-semibold uppercase tracking-wider">
               No commitment required. Start with a free analytical diagnostic.

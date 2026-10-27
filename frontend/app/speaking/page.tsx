@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { toast } from "sonner";
+import { readSseEvents } from "@/lib/sse";
 import { Loader2, Mic, Square, Volume2, ArrowLeft, CheckCircle, RefreshCw, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -284,11 +285,13 @@ function SpeakingPageContent() {
       elevenLabsAudioRef.current = audio;
 
       audio.onended = () => {
+        elevenLabsAudioRef.current = null;
         setIsSpeakingPrompt(false);
         URL.revokeObjectURL(audioUrl);
       };
       audio.onerror = (e) => {
         console.error("[Audio Playback Error]", e);
+        elevenLabsAudioRef.current = null;
         setIsSpeakingPrompt(false);
         URL.revokeObjectURL(audioUrl);
         // Fallback to browser synthesis
@@ -298,6 +301,7 @@ function SpeakingPageContent() {
       await audio.play();
     } catch (error) {
       console.warn("[ElevenLabs API Error] falling back to browser voice:", error);
+      elevenLabsAudioRef.current = null;
       playBrowserSpeech(currentPart.question);
     }
   };
@@ -309,16 +313,15 @@ function SpeakingPageContent() {
 
     if (prepTimerRef.current) clearInterval(prepTimerRef.current);
 
+    let remaining = 60;
     prepTimerRef.current = setInterval(() => {
-      setPrepSeconds((prev) => {
-        if (prev <= 1) {
-          if (prepTimerRef.current) clearInterval(prepTimerRef.current);
-          setIsPrepping(false);
-          startRecording(); // Auto start recording when prep ends
-          return 0;
-        }
-        return prev - 1;
-      });
+      remaining -= 1;
+      setPrepSeconds(remaining);
+      if (remaining <= 0) {
+        if (prepTimerRef.current) clearInterval(prepTimerRef.current);
+        setIsPrepping(false);
+        startRecording(); // Auto start recording when prep ends
+      }
     }, 1000);
   };
 
@@ -335,7 +338,8 @@ function SpeakingPageContent() {
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      const mimeType = ["audio/webm", "audio/mp4", "audio/ogg"].find((type) => MediaRecorder.isTypeSupported(type));
+      const mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       
       mediaRecorderRef.current = mediaRecorder;
       mediaRecorder.ondataavailable = (event) => {
@@ -345,7 +349,7 @@ function SpeakingPageContent() {
       };
 
       mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        const audioBlob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType || "audio/webm" });
         stream.getTracks().forEach((track) => track.stop());
         handleTranscribe(audioBlob);
       };
@@ -354,15 +358,12 @@ function SpeakingPageContent() {
       setIsRecording(true);
 
       if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+      const limit = currentPart.part === 2 ? 120 : 60;
+      let elapsed = 0;
       recordTimerRef.current = setInterval(() => {
-        setRecordingSeconds((prev) => {
-          const limit = currentPart.part === 2 ? 120 : 60;
-          if (prev >= limit) {
-            stopRecording();
-            return limit;
-          }
-          return prev + 1;
-        });
+        elapsed += 1;
+        setRecordingSeconds(elapsed);
+        if (elapsed >= limit) stopRecording();
       }, 1000);
 
       toast.success("Recording started. Speak now!");
@@ -374,9 +375,8 @@ function SpeakingPageContent() {
 
   // Stop recording microphone
   const stopRecording = () => {
-    if (!mediaRecorderRef.current || !isRecording) return;
-    
     if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+    if (mediaRecorderRef.current?.state !== "recording") return;
     mediaRecorderRef.current.stop();
     setIsRecording(false);
   };
@@ -388,7 +388,8 @@ function SpeakingPageContent() {
 
     try {
       const formData = new FormData();
-      formData.append("audio", blob, "speaking_test.webm");
+      const extension = blob.type.includes("mp4") ? "m4a" : blob.type.includes("ogg") ? "ogg" : "webm";
+      formData.append("audio", blob, `speaking_test.${extension}`);
 
       const response = await fetch(`${BACKEND_URL}/api/speaking/transcribe`, {
         method: "POST",
@@ -443,103 +444,36 @@ function SpeakingPageContent() {
         }),
       });
 
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({ error: "Failed to grade response." }));
-        throw new Error(errData.error || "Failed to grade response.");
-      }
-
-      if (!response.body) {
-        throw new Error("No response body received from stream.");
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
       let accumulated = "";
-      let eventBuffer = "";
       let finalResult: SpeakingResult | null = null;
 
-      const processEventLine = (line: string) => {
-        const trimmedLine = line.trim();
-        if (!trimmedLine.startsWith("data: ")) return;
-
-        const dataStr = trimmedLine.slice(6).trim();
-        if (!dataStr || dataStr === "[DONE]") return;
-
-        let data: {
-          token?: string;
-          done?: boolean;
-          id?: string;
-          result?: Partial<SpeakingResult>;
-          error?: unknown;
-        };
-        try {
-          data = JSON.parse(dataStr);
-        } catch {
-          throw new Error("The evaluation server returned an invalid stream event.");
-        }
-
-        if (data.token) {
-          accumulated += data.token;
-          setStreamingText(accumulated);
-          return;
-        }
-
-        if (data.done) {
-          if (!data.result) {
-            throw new Error("The evaluation server completed without a result.");
+      await readSseEvents<{ token?: string; done?: boolean; id?: string; result?: Partial<SpeakingResult> }>(
+        response,
+        (data) => {
+          if (data.token) {
+            accumulated += data.token;
+            setStreamingText(accumulated);
+          } else if (data.done) {
+            if (!data.result) {
+              throw new Error("The evaluation server completed without a result.");
+            }
+            finalResult = {
+              id: data.id,
+              band_score: Number(data.result.band_score),
+              fluency_coherence: Number(data.result.fluency_coherence),
+              lexical_resource: Number(data.result.lexical_resource),
+              grammatical_range: Number(data.result.grammatical_range),
+              pronunciation: Number(data.result.pronunciation),
+              examiner_comments: data.result.examiner_comments || "",
+              improvements: data.result.improvements || [],
+            };
           }
-          finalResult = {
-            id: data.id,
-            band_score: Number(data.result.band_score),
-            fluency_coherence: Number(data.result.fluency_coherence),
-            lexical_resource: Number(data.result.lexical_resource),
-            grammatical_range: Number(data.result.grammatical_range),
-            pronunciation: Number(data.result.pronunciation),
-            examiner_comments: data.result.examiner_comments || "",
-            improvements: data.result.improvements || [],
-          };
-          return;
         }
-
-        if (data.error) {
-          throw new Error(
-            typeof data.error === "string"
-              ? data.error
-              : "The evaluation server reported an error."
-          );
-        }
-      };
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        eventBuffer += decoder.decode(value, { stream: true });
-        const lines = eventBuffer.split("\n");
-        eventBuffer = lines.pop() || "";
-        lines.forEach(processEventLine);
-      }
-
-      eventBuffer += decoder.decode();
-      if (eventBuffer.trim()) {
-        processEventLine(eventBuffer);
-      }
+      );
 
       if (finalResult) {
         setResult(finalResult);
         toast.success("Speaking response evaluated!");
-        // Background refresh user study roadmap based on new score averages
-        fetch(`${BACKEND_URL}/api/planner/generate`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-        }).then(res => {
-          if (res.ok) {
-            toast.info("Your study plan has been updated with these results.");
-          }
-        }).catch(err => console.error("Roadmap auto-sync failed:", err));
       } else {
         throw new Error("Failed to receive completed speaking evaluation from server.");
       }
