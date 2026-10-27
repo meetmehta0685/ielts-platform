@@ -1,7 +1,7 @@
 import { Response } from "express";
 import { AuthenticatedRequest } from "../middleware/authMiddleware";
 import { supabase } from "../services/supabaseClient";
-import { ChatMessage, completeJson } from "../services/openrouter";
+import { ChatMessage, completeJson } from "../services/ai";
 import fs from "fs";
 import path from "path";
 import { rawScoreToBand } from "../utils/bandScore";
@@ -141,7 +141,8 @@ Return a JSON object only. The keys should be the Question IDs as strings, and v
             { role: "system", content: "You are an IELTS tutor. Respond in valid JSON format only." },
             { role: "user", content: prompt }
           ];
-          explanations = await completeJson(messages);
+          // Explanations are extra; the score must not wait on a busy AI provider.
+          explanations = await completeJson(messages, 20_000);
         } catch (e) {
           console.error("[AI Explanation Generation Error]:", e);
         }
@@ -244,7 +245,8 @@ Return a JSON object only. The keys should be the Question IDs as strings, and v
             { role: "system", content: "You are an IELTS tutor. Respond in valid JSON format only." },
             { role: "user", content: prompt }
           ];
-          explanations = await completeJson(messages);
+          // Explanations are extra; the score must not wait on a busy AI provider.
+          explanations = await completeJson(messages, 20_000);
         } catch (e) {
           console.error("[AI Listening Explanation Error]:", e);
         }

@@ -17,6 +17,10 @@ import { CriteriaTable, NextSteps, OverallBand } from "@/components/writing/band
 import { CueCard } from "@/components/speaking/cue-card";
 import { cn } from "@/lib/utils";
 
+// Whisper turns silence into a word or two ("Thank you."); anything this short is not an answer to mark.
+const MIN_ANSWER_WORDS = 5;
+const countWords = (text: string) => (text.trim() ? text.trim().split(/\s+/).length : 0);
+
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 interface SpeakingPartPrompt {
@@ -443,8 +447,11 @@ function SpeakingPageContent() {
       }
 
       const data = await response.json();
-      setTranscript(data.transcript || "");
-      toast.success("Speech transcribed successfully!");
+      const heard: string = data.transcript || "";
+      setTranscript(heard);
+      if (countWords(heard) < MIN_ANSWER_WORDS) {
+        throw new Error("We could not hear an answer. Check your microphone is on and record again.");
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to transcribe audio.";
       setSpeakError(message);
@@ -457,8 +464,8 @@ function SpeakingPageContent() {
   // Evaluate the transcript using AI Mentor grading criteria
   const handleEvaluate = async () => {
     if (!token) return;
-    if (!transcript || transcript.trim().length < 10) {
-      toast.error("Please record a response first (minimum 10 characters transcribed).");
+    if (countWords(transcript) < MIN_ANSWER_WORDS) {
+      toast.error("Record an answer of at least a sentence before marking.");
       return;
     }
 
@@ -562,7 +569,7 @@ function SpeakingPageContent() {
 
   const partOptions = SPEAKING_PARTS.map((p, idx) => ({ value: String(idx), label: `Part ${p.part}` }));
   const limitSeconds = currentPart.part === 2 ? 120 : 60;
-  const transcriptWords = transcript.trim() ? transcript.trim().split(/\s+/).length : 0;
+  const transcriptWords = countWords(transcript);
   const busy = isRecording || isPrepping || isTranscribing || isGrading;
 
   /* ---------- Result: the band, the four criteria, then the examiner's comments ---------- */

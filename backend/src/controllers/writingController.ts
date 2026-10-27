@@ -1,7 +1,7 @@
 import { Response } from "express";
 import { AuthenticatedRequest } from "../middleware/authMiddleware";
 import { supabase } from "../services/supabaseClient";
-import { ChatMessage } from "../services/openrouter";
+import { ChatMessage } from "../services/ai";
 import { streamJsonEvaluation } from "../utils/sse";
 import { z } from "zod";
 

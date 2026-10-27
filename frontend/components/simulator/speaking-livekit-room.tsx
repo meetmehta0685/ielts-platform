@@ -212,6 +212,8 @@ function RoomPlaceholder({
   );
 }
 
+const DEVICE_ERRORS = new Set(["NotAllowedError", "NotFoundError", "NotReadableError", "OverconstrainedError"]);
+
 export default function SpeakingLiveKitRoom({
   backendUrl,
   authToken,
@@ -222,6 +224,7 @@ export default function SpeakingLiveKitRoom({
 }: SpeakingLiveKitRoomProps) {
   const [details, setDetails] = useState<RoomDetails | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
+  const [deviceFailure, setDeviceFailure] = useState<MediaDeviceKind | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
   const [isRetrying, setIsRetrying] = useState(false);
 
@@ -300,10 +303,16 @@ export default function SpeakingLiveKitRoom({
       serverUrl={details.serverUrl}
       connect
       audio
-      video
+      video={false}
       options={{ adaptiveStream: true, dynacast: true }}
       className="relative"
-      onError={(error) => setRequestError(error.message)}
+      // A refused or missing camera or microphone is the candidate's to fix and must not close the room;
+      // only connection errors end it.
+      onMediaDeviceFailure={(_, kind) => setDeviceFailure(kind ?? "audioinput")}
+      onError={(error) => {
+        if (DEVICE_ERRORS.has(error.name)) return;
+        setRequestError(error.message);
+      }}
     >
       <RoomAudioRenderer />
       <LiveSpeakingStage
@@ -311,6 +320,7 @@ export default function SpeakingLiveKitRoom({
         agentDispatchError={details.agentDispatchError}
         candidateName={candidateName}
         prompt={details.speakingPrompt}
+        deviceFailure={deviceFailure}
         onTranscriptChange={onTranscriptChange}
       />
     </LiveKitRoom>
@@ -334,12 +344,14 @@ function LiveSpeakingStage({
   agentDispatchError,
   candidateName,
   prompt,
+  deviceFailure,
   onTranscriptChange,
 }: {
   agentName: string;
   agentDispatchError?: string | null;
   candidateName: string;
   prompt: string;
+  deviceFailure: MediaDeviceKind | null;
   onTranscriptChange: (transcript: string) => void;
 }) {
   const room = useRoomContext();
@@ -477,8 +489,14 @@ function LiveSpeakingStage({
                 {isMicrophoneEnabled ? "Microphone on · tap to mute" : "Microphone off · tap to unmute"}
               </span>
             </TrackToggle>
-            {!isMicrophoneEnabled && (
-              <p className="t-rise text-[14px] text-bad">The examiner cannot hear you while the microphone is off.</p>
+            {deviceFailure === "audioinput" && !isMicrophoneEnabled ? (
+              <p className="t-rise text-[14px] text-bad">
+                Your browser blocked the microphone. Allow microphone access for this site, then turn it on.
+              </p>
+            ) : (
+              !isMicrophoneEnabled && (
+                <p className="t-rise text-[14px] text-bad">The examiner cannot hear you while the microphone is off.</p>
+              )
             )}
             <TrackToggle
               source={Track.Source.Camera}
@@ -488,6 +506,9 @@ function LiveSpeakingStage({
               {isCameraEnabled ? <Video className="size-4" /> : <VideoOff className="size-4" />}
               {isCameraEnabled ? "Camera on" : "Camera off"}
             </TrackToggle>
+            {deviceFailure === "videoinput" && !isCameraEnabled && (
+              <p className="t-rise text-[14px] text-soft">The camera is blocked. The interview works without it.</p>
+            )}
           </div>
 
           <TranscriptPanel

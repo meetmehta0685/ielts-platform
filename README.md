@@ -49,7 +49,7 @@ flowchart LR
     F -->|"Supabase Auth"| S["Supabase<br/>Auth + PostgreSQL + RLS"]
     F -->|"Bearer token + REST/SSE"| B["Express API<br/>port 8000"]
     B -->|"Verify users and store results"| S
-    B -->|"Chat and evaluation"| O["OpenRouter"]
+    B -->|"Chat and evaluation"| O["Groq, then OpenRouter"]
     B -->|"Audio transcription"| G["Groq Whisper"]
     B -.->|"Optional speech synthesis"| E["ElevenLabs"]
     F -->|"WebRTC audio"| L["LiveKit Cloud"]
@@ -74,7 +74,7 @@ All application API routes require a valid Supabase access token. Database Row L
 
 - Node.js, Express 5, and TypeScript
 - Supabase service-role client and JWT verification
-- OpenRouter for mentor chat, study plans, and band evaluations
+- Groq (with OpenRouter as a fallback) for mentor chat, study plans, and band evaluations
 - Server-Sent Events (SSE) for streamed AI responses
 - Groq Whisper for practice-audio transcription
 - ElevenLabs for optional text-to-speech, with browser speech synthesis as a fallback
@@ -103,7 +103,7 @@ ielts-platform/
 │       ├── data/             # Reading and listening test fixtures
 │       ├── middleware/       # Supabase bearer-token authentication
 │       ├── routes/           # API route definitions
-│       ├── services/         # OpenRouter and Supabase clients
+│       ├── services/         # AI provider chain and Supabase client
 │       └── utils/            # Band-score conversion and SSE helpers
 ├── agent/                    # LiveKit speaking examiner worker
 ├── supabase/                 # Supabase CLI config and schema migration
@@ -118,8 +118,7 @@ ielts-platform/
 - [Node.js](https://nodejs.org/) **20 or newer**
 - npm
 - A [Supabase](https://supabase.com/) project
-- An [OpenRouter](https://openrouter.ai/) API key
-- A [Groq](https://console.groq.com/) API key for recorded speaking practice
+- A [Groq](https://console.groq.com/) API key, and optionally an [OpenRouter](https://openrouter.ai/) key as a fallback
 - A [LiveKit Cloud](https://cloud.livekit.io/) project for the live speaking simulator
 - Optionally, an [ElevenLabs](https://elevenlabs.io/) API key for higher-quality examiner speech in standalone speaking practice
 
@@ -217,10 +216,11 @@ Then add the same LiveKit URL, key, secret, and agent name used by the backend. 
 | Backend | `PORT` | No | API port; defaults to `8000` |
 | Backend | `SUPABASE_URL` | Yes | Supabase project URL |
 | Backend | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Server-only key for authenticated database operations |
-| Backend | `OPENROUTER_API_KEY` | Yes | AI mentor, study-plan, writing, and speaking evaluation requests |
-| Backend | `OPENROUTER_MODELS` | No | Comma-separated fallback list (up to three); defaults to free Gemma 4 / Laguna models |
+| Backend | `GROQ_API_KEY` | Yes | First provider for AI marking, the mentor and study plans, and Whisper transcription |
+| Backend | `GROQ_MODELS` | No | Comma-separated Groq models tried in order; defaults to `openai/gpt-oss-120b,qwen/qwen3.8-27b,openai/gpt-oss-20b` |
+| Backend | `OPENROUTER_API_KEY` | No | Last-resort AI provider when every Groq model is rate-limited |
+| Backend | `OPENROUTER_MODELS` | No | Comma-separated OpenRouter fallback list (up to three); defaults to free Gemma 4 / Laguna models |
 | Backend | `CORS_ORIGIN` | No | Comma-separated allowed origins; defaults to all |
-| Backend | `GROQ_API_KEY` | Speaking practice | Whisper audio transcription |
 | Backend | `ELEVENLABS_API_KEY` | No | Higher-quality question speech; browser TTS is used when absent |
 | Backend | `ELEVENLABS_VOICE_ID` | No | ElevenLabs voice override |
 | Backend + agent | `LIVEKIT_URL` | Live simulator | LiveKit WebSocket URL |

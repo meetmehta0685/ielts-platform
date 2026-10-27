@@ -1,7 +1,7 @@
 import { Response } from "express";
 import { AuthenticatedRequest } from "../middleware/authMiddleware";
 import { supabase } from "../services/supabaseClient";
-import { ChatMessage, completeJson } from "../services/openrouter";
+import { ChatMessage, completeJson } from "../services/ai";
 
 export class PlannerController {
   /**

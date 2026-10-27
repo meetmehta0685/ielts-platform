@@ -1,7 +1,7 @@
 import { Response } from "express";
 import { AuthenticatedRequest } from "../middleware/authMiddleware";
 import { supabase } from "../services/supabaseClient";
-import { ChatMessage, streamCompletion } from "../services/openrouter";
+import { ChatMessage, streamCompletion } from "../services/ai";
 import { sendSse, startSse } from "../utils/sse";
 
 export class ChatController {

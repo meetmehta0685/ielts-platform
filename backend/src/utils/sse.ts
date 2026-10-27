@@ -1,5 +1,5 @@
 import { Response } from "express";
-import { ChatMessage, parseJsonReply, streamCompletion } from "../services/openrouter";
+import { ChatMessage, parseJsonReply, streamCompletion } from "../services/ai";
 
 export function startSse(res: Response) {
   res.setHeader("Content-Type", "text/event-stream");
