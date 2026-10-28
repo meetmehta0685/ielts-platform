@@ -95,7 +95,7 @@ export function ObjectiveResults({
             return (
               <li
                 key={q.id}
-                className="t-rise grid grid-cols-[32px_1fr] gap-x-3 gap-y-3 border-t border-[#e4e0d8] py-4 md:grid-cols-[32px_minmax(0,1fr)_180px_180px_96px] md:gap-x-5"
+                className="t-rise grid grid-cols-[32px_1fr] gap-x-3 gap-y-3 border-t border-border py-4 md:grid-cols-[32px_minmax(0,1fr)_180px_180px_96px] md:gap-x-5"
                 style={{ animationDelay: `${index * 40}ms` }}
               >
                 <span className="tabular pt-0.5 text-[15px] font-medium text-ink">{q.id}</span>

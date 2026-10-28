@@ -53,8 +53,8 @@ export function CriteriaTable({
                   {row.label}
                 </th>
                 <td className="hidden py-4 pr-6 align-middle sm:table-cell">
-                  <div className="relative h-1.5 rounded-full bg-putty" aria-hidden>
-                    <div className="absolute inset-y-0 left-0 rounded-full bg-teal" style={{ width: `${pct}%` }} />
+                  <div className="relative h-1.5 rounded-full bg-panel-strong" aria-hidden>
+                    <div className="absolute inset-y-0 left-0 rounded-full bg-brand" style={{ width: `${pct}%` }} />
                   </div>
                 </td>
                 <td className={cn("tabular py-4 text-right align-middle text-[28px] leading-none text-ink", !valid && "text-soft")}>

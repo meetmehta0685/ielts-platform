@@ -22,6 +22,7 @@ import {
 } from "@/components/exam/exam-frame";
 import { QuestionGroups, QuestionNavigator, type ExamQuestion } from "@/components/exam/question-field";
 import { AudioPlayer } from "@/components/exam/audio-player";
+import { MODULE_HUE } from "@/lib/module-hue";
 import { cn } from "@/lib/utils";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -135,8 +136,11 @@ function MarkingOverlay({ label }: { label: string }) {
 
 function IntroRow({ name, what, time }: { name: string; what: ReactNode; time: string }) {
   return (
-    <li className="grid grid-cols-[1fr_auto] items-baseline gap-x-4 gap-y-1 border-t border-[#e4e0d8] py-4 first:border-t-0 first:pt-0 sm:grid-cols-[120px_1fr_auto]">
-      <span className="text-[15px] font-medium text-ink">{name}</span>
+    <li className="grid grid-cols-[1fr_auto] items-baseline gap-x-4 gap-y-1 border-t border-border py-4 first:border-t-0 first:pt-0 sm:grid-cols-[120px_1fr_auto]">
+      <span className="flex items-center gap-2 text-[15px] font-medium text-ink">
+        <span aria-hidden className={`size-2 rounded-full ${MODULE_HUE[name]}`} />
+        {name}
+      </span>
       <span className="tabular text-right text-[15px] text-ink sm:order-last">{time}</span>
       <span className="col-span-2 text-[15px] leading-normal text-soft sm:col-span-1">{what}</span>
     </li>
@@ -470,31 +474,31 @@ export default function SimulatorPage() {
           <link href="https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600&f[]=gambarino@400&display=swap" rel="stylesheet">
           <style>
             * { box-sizing: border-box; }
-            body { margin: 0; padding: 40px 16px; background: #ebe8e2; color: #0a0a0a;
+            body { margin: 0; padding: 40px 16px; background: #f3f3f5; color: #0c0c12;
               font-family: "General Sans", ui-sans-serif, system-ui, sans-serif; font-size: 15px; line-height: 1.5; }
             .bar { max-width: 800px; margin: 0 auto 16px; display: flex; gap: 8px; justify-content: flex-end; }
             .bar button { height: 40px; padding: 0 20px; border: 0; border-radius: 999px; font: inherit; font-weight: 500; cursor: pointer; }
-            .primary { background: #256f82; color: #fff; }
-            .secondary { background: #ece9e3; color: #0a0a0a; }
-            .sheet { max-width: 800px; margin: 0 auto; background: #fff; border: 1px solid #e4e0d8; border-radius: 16px; padding: 40px; }
-            .head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding-bottom: 20px; border-bottom: 1px solid #e4e0d8; }
+            .primary { background: #3452ff; color: #fff; }
+            .secondary { background: #eeeef2; color: #0c0c12; }
+            .sheet { max-width: 800px; margin: 0 auto; background: #fff; border: 1px solid #e7e7ec; border-radius: 16px; padding: 40px; }
+            .head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding-bottom: 20px; border-bottom: 1px solid #e7e7ec; }
             h1 { font-family: "Gambarino", Georgia, serif; font-weight: 400; font-size: 40px; line-height: 0.92; margin: 0; }
-            .soft { color: #5c5852; }
-            .details { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding: 20px 0; border-bottom: 1px solid #e4e0d8; }
-            .label { font-size: 13px; color: #5c5852; }
-            .scores { display: grid; grid-template-columns: repeat(4, 1fr) 1.4fr; margin-top: 24px; border: 1px solid #e4e0d8; border-radius: 12px; overflow: hidden; }
-            .cell { padding: 16px; border-left: 1px solid #e4e0d8; }
+            .soft { color: #62626d; }
+            .details { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding: 20px 0; border-bottom: 1px solid #e7e7ec; }
+            .label { font-size: 13px; color: #62626d; }
+            .scores { display: grid; grid-template-columns: repeat(4, 1fr) 1.4fr; margin-top: 24px; border: 1px solid #e7e7ec; border-radius: 12px; overflow: hidden; }
+            .cell { padding: 16px; border-left: 1px solid #e7e7ec; }
             .cell:first-child { border-left: 0; }
             .value { font-size: 32px; font-variant-numeric: tabular-nums; margin-top: 8px; }
-            .value.ungraded { font-size: 15px; color: #5c5852; margin-top: 18px; }
-            .overall { background: #f5f3ef; }
+            .value.ungraded { font-size: 15px; color: #62626d; margin-top: 18px; }
+            .overall { background: #f6f6f8; }
             .overall .value { font-family: "Gambarino", Georgia, serif; font-size: 64px; line-height: 0.92; }
-            .note { margin-top: 24px; padding: 16px; background: #f5f3ef; border-radius: 12px; font-size: 14px; color: #5c5852; }
-            .foot { margin-top: 24px; display: flex; justify-content: space-between; gap: 16px; font-size: 13px; color: #5c5852; }
+            .note { margin-top: 24px; padding: 16px; background: #f6f6f8; border-radius: 12px; font-size: 14px; color: #62626d; }
+            .foot { margin-top: 24px; display: flex; justify-content: space-between; gap: 16px; font-size: 13px; color: #62626d; }
             @media (max-width: 640px) {
               .sheet { padding: 24px; }
               .details, .scores { grid-template-columns: 1fr 1fr; }
-              .cell { border-top: 1px solid #e4e0d8; }
+              .cell { border-top: 1px solid #e7e7ec; }
               .cell:nth-child(odd) { border-left: 0; }
               .overall { grid-column: span 2; }
             }
@@ -641,8 +645,8 @@ export default function SimulatorPage() {
               </span>
             }
           >
-            <div className="rounded-2xl border border-[#e4e0d8] bg-sheet p-5 sm:p-6">
-              <dl className="grid grid-cols-2 gap-4 border-b border-[#e4e0d8] pb-5 md:grid-cols-4">
+            <div className="rounded-2xl border border-border bg-sheet p-5 sm:p-6">
+              <dl className="grid grid-cols-2 gap-4 border-b border-border pb-5 md:grid-cols-4">
                 <div>
                   <dt className="text-[13px] text-soft">Candidate name</dt>
                   <dd className="mt-0.5 text-[15px] text-ink">{candidateName}</dd>
@@ -661,12 +665,12 @@ export default function SimulatorPage() {
                 </div>
               </dl>
 
-              <div className="mt-5 grid grid-cols-2 overflow-hidden rounded-xl border border-[#e4e0d8] md:grid-cols-[repeat(4,1fr)_1.5fr]">
+              <div className="mt-5 grid grid-cols-2 overflow-hidden rounded-xl border border-border md:grid-cols-[repeat(4,1fr)_1.5fr]">
                 {moduleScores.map((item, i) => (
                   <div
                     key={item.module}
                     className={cn(
-                      "border-[#e4e0d8] p-4",
+                      "border-border p-4",
                       i % 2 === 1 && "border-l",
                       i >= 2 && "border-t md:border-t-0",
                       i > 0 && "md:border-l"
@@ -680,7 +684,7 @@ export default function SimulatorPage() {
                     )}
                   </div>
                 ))}
-                <div className="col-span-2 border-t border-[#e4e0d8] bg-panel p-4 md:col-span-1 md:border-t-0 md:border-l">
+                <div className="col-span-2 border-t border-border bg-panel p-4 md:col-span-1 md:border-t-0 md:border-l">
                   <p className="text-[13px] text-soft">Overall band</p>
                   <p className="mt-2 font-display text-[104px] leading-[0.92] text-ink">
                     {overallScore !== null ? <BandDigits value={overallScore.toFixed(1)} /> : "—"}

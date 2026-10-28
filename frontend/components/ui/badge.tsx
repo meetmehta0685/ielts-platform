@@ -12,7 +12,7 @@ const badgeVariants = cva(
         secondary: "bg-panel-strong text-ink",
         destructive: "bg-bad-tint text-bad",
         outline: "bg-panel text-ink",
-        accent: "bg-teal-tint text-teal",
+        accent: "bg-brand-tint text-brand",
       },
     },
     defaultVariants: {

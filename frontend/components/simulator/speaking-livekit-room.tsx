@@ -59,9 +59,9 @@ export interface SpeakingLiveKitRoomProps {
 type RoomState = "preparing" | "connecting" | "waiting" | "live" | "unavailable";
 
 const STATUS: Record<RoomState, { text: string; dot: string }> = {
-  preparing: { text: "Opening your exam room", dot: "bg-putty-deep" },
-  connecting: { text: "Connecting to the examiner", dot: "bg-putty-deep" },
-  waiting: { text: "Room open. The examiner has not joined yet", dot: "bg-putty-deep" },
+  preparing: { text: "Opening your exam room", dot: "bg-line-strong" },
+  connecting: { text: "Connecting to the examiner", dot: "bg-line-strong" },
+  waiting: { text: "Room open. The examiner has not joined yet", dot: "bg-line-strong" },
   live: { text: "Examiner connected", dot: "bg-good" },
   unavailable: { text: "Examiner unavailable", dot: "bg-bad" },
 };
@@ -101,7 +101,7 @@ function ExaminerPortrait({ dim }: { dim?: boolean }) {
 
 function CueCard({ prompt }: { prompt: string | null }) {
   return (
-    <section aria-label="Cue card" className="rounded-2xl border border-[#e4e0d8] bg-sheet p-5">
+    <section aria-label="Cue card" className="rounded-2xl border border-border bg-sheet p-5">
       <p className="text-[13px] text-soft">Cue card · the topic the examiner will ask about</p>
       {prompt ? (
         <p className="mt-2 text-[17px] leading-normal text-ink">{prompt}</p>
@@ -427,7 +427,7 @@ function LiveSpeakingStage({
         aside={
           <StartAudio
             label="Turn on examiner audio"
-            className="inline-flex h-10 items-center rounded-full bg-ink px-5 text-[15px] font-medium text-white transition-colors duration-[var(--duration-quick)] hover:bg-[#2a2926]"
+            className="inline-flex h-10 items-center rounded-full bg-ink px-5 text-[15px] font-medium text-white transition-colors duration-[var(--duration-quick)] hover:bg-ink-hover"
           />
         }
       />
@@ -442,7 +442,7 @@ function LiveSpeakingStage({
             )}
             <TileLabel>
               {agentName} · examiner
-              {examinerParticipant && <SpeakingBars participant={examinerParticipant} className="text-teal" />}
+              {examinerParticipant && <SpeakingBars participant={examinerParticipant} className="text-brand" />}
             </TileLabel>
             {state === "live" && (
               <span className="absolute top-3 right-3 inline-flex items-center gap-1.5 rounded-full bg-sheet px-3 py-1 text-[13px] font-medium text-ink">
@@ -471,7 +471,7 @@ function LiveSpeakingStage({
             )}
             <TileLabel>
               {candidateName}
-              <SpeakingBars participant={localParticipant} className="text-teal" />
+              <SpeakingBars participant={localParticipant} className="text-brand" />
             </TileLabel>
           </div>
 
@@ -480,8 +480,8 @@ function LiveSpeakingStage({
               source={Track.Source.Microphone}
               showIcon={false}
               className={cn(
-                "inline-flex h-12 w-full items-center justify-center gap-2 rounded-full text-[15px] font-medium transition-[background-color,color,transform] duration-[var(--duration-quick)] active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal",
-                isMicrophoneEnabled ? "bg-ink text-white hover:bg-[#2a2926]" : "bg-bad-tint text-bad hover:bg-[#f2d6d3]"
+                "inline-flex h-12 w-full items-center justify-center gap-2 rounded-full text-[15px] font-medium transition-[background-color,color,transform] duration-[var(--duration-quick)] active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand",
+                isMicrophoneEnabled ? "bg-ink text-white hover:bg-ink-hover" : "bg-bad-tint text-bad hover:bg-bad-tint-hover"
               )}
             >
               {isMicrophoneEnabled ? <Mic className="size-4" /> : <MicOff className="size-4" />}
@@ -501,7 +501,7 @@ function LiveSpeakingStage({
             <TrackToggle
               source={Track.Source.Camera}
               showIcon={false}
-              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-panel-strong text-[15px] font-medium text-ink transition-[background-color,transform] duration-[var(--duration-quick)] hover:bg-[#e2ded6] active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal"
+              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-panel-strong text-[15px] font-medium text-ink transition-[background-color,transform] duration-[var(--duration-quick)] hover:bg-panel-hover active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
             >
               {isCameraEnabled ? <Video className="size-4" /> : <VideoOff className="size-4" />}
               {isCameraEnabled ? "Camera on" : "Camera off"}

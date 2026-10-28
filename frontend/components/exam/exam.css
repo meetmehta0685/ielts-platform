@@ -98,7 +98,7 @@
   animation: x-modal-in var(--duration-fast) var(--ease-smooth-out) both;
 }
 
-/* The audio scrubber: a plain rule with a teal played portion. */
+/* The audio scrubber: a plain rule with a brand-blue played portion. */
 .x-range {
   -webkit-appearance: none;
   appearance: none;
@@ -110,17 +110,17 @@
 .x-range::-webkit-slider-runnable-track {
   height: 4px;
   border-radius: 999px;
-  background: linear-gradient(to right, var(--teal) var(--played, 0%), var(--putty) var(--played, 0%));
+  background: linear-gradient(to right, var(--brand) var(--played, 0%), var(--panel-strong) var(--played, 0%));
 }
 .x-range::-moz-range-track {
   height: 4px;
   border-radius: 999px;
-  background: var(--putty);
+  background: var(--panel-strong);
 }
 .x-range::-moz-range-progress {
   height: 4px;
   border-radius: 999px;
-  background: var(--teal);
+  background: var(--brand);
 }
 .x-range::-webkit-slider-thumb {
   -webkit-appearance: none;
@@ -142,7 +142,7 @@
   transform: scale(1.15);
 }
 .x-range:focus-visible {
-  outline: 2px solid var(--teal);
+  outline: 2px solid var(--brand);
   outline-offset: 2px;
   border-radius: 4px;
 }

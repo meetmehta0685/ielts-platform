@@ -8,7 +8,9 @@ import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 
-const NAV: { heading: string; items: { href: string; label: string }[] }[] = [
+type NavItem = { href: string; label: string; dot?: string };
+
+const NAV: { heading: string; items: NavItem[] }[] = [
   {
     heading: "Your prep",
     items: [
@@ -20,10 +22,10 @@ const NAV: { heading: string; items: { href: string; label: string }[] }[] = [
   {
     heading: "Practise",
     items: [
-      { href: "/writing", label: "Writing" },
-      { href: "/speaking", label: "Speaking" },
-      { href: "/reading", label: "Reading" },
-      { href: "/listening", label: "Listening" },
+      { href: "/writing", label: "Writing", dot: "bg-writing" },
+      { href: "/speaking", label: "Speaking", dot: "bg-speaking" },
+      { href: "/reading", label: "Reading", dot: "bg-reading" },
+      { href: "/listening", label: "Listening", dot: "bg-listening" },
       { href: "/chat", label: "Ask the mentor" },
     ],
   },
@@ -39,7 +41,7 @@ export function ProductMark({ className }: { className?: string }) {
     <span
       aria-hidden
       className={cn(
-        "inline-flex size-7 items-center justify-center rounded-[7px] bg-teal font-display text-[17px] leading-none text-white",
+        "inline-flex size-7 items-center justify-center rounded-[9px] bg-brand font-display text-[16px] leading-none text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.25),0_2px_6px_-2px_rgb(52_82_255/0.6)]",
         className
       )}
     >
@@ -67,7 +69,7 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
     <nav aria-label="App" className="flex flex-col gap-6">
       {NAV.map((group) => (
         <div key={group.heading}>
-          <p className="mb-1.5 px-3 text-[13px] text-soft">{group.heading}</p>
+          <p className="mb-1.5 px-3 text-[13px] font-medium text-soft">{group.heading}</p>
           <ul className="flex flex-col gap-0.5">
             {group.items.map((item) => {
               const active = pathname === item.href || pathname.startsWith(item.href + "/");
@@ -78,10 +80,11 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
                     onClick={onNavigate}
                     aria-current={active ? "page" : undefined}
                     className={cn(
-                      "flex h-9 items-center rounded-[8px] px-3 text-[15px] text-ink transition-colors duration-[var(--duration-quick)]",
-                      active ? "bg-[#dcd8d0] font-medium" : "hover:bg-[#e2dfd8]"
+                      "flex h-9 items-center gap-2.5 rounded-[10px] px-3 text-[15px] transition-[background-color,box-shadow,color] duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)]",
+                      active ? "bg-sheet font-medium text-ink shadow-tile" : "text-ink/75 hover:bg-panel-hover hover:text-ink"
                     )}
                   >
+                    {item.dot && <span aria-hidden className={cn("size-2 rounded-full", item.dot)} />}
                     {item.label}
                   </Link>
                 </li>
@@ -115,7 +118,7 @@ function AccountRow() {
     <div className="flex items-center gap-3 px-3">
       <span
         aria-hidden
-        className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-teal-tint text-sm font-medium text-teal"
+        className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-brand text-sm font-semibold text-white"
       >
         {account?.name.charAt(0).toUpperCase() ?? ""}
       </span>
@@ -135,7 +138,7 @@ function AccountRow() {
 }
 
 /**
- * The signed-in frame: a putty-tinted sidebar forming an L with the window edge, and the page on a
+ * The signed-in frame: a cool grey sidebar forming an L with the window edge, and the page on a
  * white sheet inset 8px. `title` labels the phone top bar; the page itself renders its own h1.
  */
 export function AppShell({ title, children }: { title: string; children: ReactNode }) {
@@ -176,7 +179,7 @@ export function AppShell({ title, children }: { title: string; children: ReactNo
             onClick={() => setMenuOpen((open) => !open)}
             aria-expanded={menuOpen}
             aria-label={menuOpen ? "Close menu" : "Open menu"}
-            className="-mr-2 inline-flex size-10 items-center justify-center rounded-full text-ink hover:bg-[#e2dfd8]"
+            className="-mr-2 inline-flex size-10 items-center justify-center rounded-full text-ink hover:bg-panel-hover"
           >
             {menuOpen ? <X className="size-5" /> : <Menu className="size-5" />}
           </button>
@@ -194,7 +197,7 @@ export function AppShell({ title, children }: { title: string; children: ReactNo
           </div>
         </div>
 
-        <main className="min-w-0 flex-1 bg-sheet lg:rounded-2xl lg:border lg:border-[#e4e0d8]">{children}</main>
+        <main className="min-w-0 flex-1 bg-sheet lg:rounded-[20px] lg:shadow-tile">{children}</main>
       </div>
     </div>
   );
@@ -221,7 +224,7 @@ export function PageColumn({
     <div className={cn("mx-auto w-full max-w-[1132px] px-4 pt-8 pb-16 sm:px-6 lg:pt-[72px] lg:pb-24", className)}>
       <div className="mb-10 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between lg:mb-[50px]">
         <div className="max-w-[760px]">
-          <h1 className="font-display text-[34px] text-ink sm:text-[48px]">{title}</h1>
+          <h1 className="font-display text-[32px] text-balance text-ink sm:text-[44px]">{title}</h1>
           {lead && <p className="mt-3 text-[17px] leading-normal text-soft">{lead}</p>}
         </div>
         {actions && <div className="flex shrink-0 flex-wrap gap-2">{actions}</div>}
@@ -231,7 +234,7 @@ export function PageColumn({
   );
 }
 
-/** One tonal panel: a step off white, its title and content directly inside, no border or shadow. */
+/** One tonal tile: a step off white, its title and content directly inside, no border or shadow. */
 export function Panel({
   title,
   aside,
@@ -244,7 +247,7 @@ export function Panel({
   className?: string;
 }) {
   return (
-    <section className={cn("rounded-2xl bg-panel p-5", className)}>
+    <section className={cn("rounded-[20px] bg-panel p-5 sm:p-6", className)}>
       {(title || aside) && (
         <div className="mb-4 flex items-baseline justify-between gap-4">
           {title && <h2 className="text-[15px] font-semibold text-ink">{title}</h2>}

@@ -123,7 +123,7 @@ const MarkdownComponents: Components = {
   th: (props: P<"th">) => <th className="border-b border-border py-2 pr-4 text-sm font-normal text-soft" {...clean(props)} />,
   td: (props: P<"td">) => <td className="border-b border-border py-2 pr-4 align-top" {...clean(props)} />,
   blockquote: (props: P<"blockquote">) => (
-    <blockquote className="my-4 border-l-2 border-putty-deep pl-4 text-soft" {...clean(props)} />
+    <blockquote className="my-4 border-l-2 border-line-strong pl-4 text-soft" {...clean(props)} />
   ),
   hr: () => <hr className="my-6 border-border" />,
 };
@@ -185,7 +185,7 @@ export function ChatArea({
     return (
       <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[720px] px-4 pt-10 pb-8 sm:px-6 lg:pt-[72px]">
-          <h1 className="font-display text-[34px] text-ink sm:text-[48px]">
+          <h1 className="font-display text-[32px] text-balance text-ink sm:text-[44px]">
             {firstName ? `What's your question, ${firstName}?` : "What's your question?"}
           </h1>
           <p className="mt-3 text-[17px] leading-normal text-soft">
@@ -197,7 +197,7 @@ export function ChatArea({
                 <button
                   type="button"
                   onClick={() => onStarterClick?.(item.prompt)}
-                  className="group flex min-h-12 w-full items-baseline justify-between gap-6 py-3.5 text-left transition-colors duration-[var(--duration-quick)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal"
+                  className="group flex min-h-12 w-full items-baseline justify-between gap-6 py-3.5 text-left transition-colors duration-[var(--duration-quick)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
                 >
                   <span className="text-base leading-snug text-ink decoration-1 underline-offset-4 group-hover:underline">
                     {item.prompt}

@@ -63,7 +63,7 @@ export function QuestionField({
         <span
           className={cn(
             "tabular inline-flex size-8 shrink-0 items-center justify-center rounded-full text-[14px] font-medium transition-colors duration-[var(--duration-quick)]",
-            answered ? "bg-ink text-white" : "bg-sheet text-ink ring-1 ring-[#d9d5cd] ring-inset"
+            answered ? "bg-ink text-white" : "bg-sheet text-ink ring-1 ring-input ring-inset"
           )}
         >
           {question.id}
@@ -87,10 +87,10 @@ export function QuestionField({
                   disabled={disabled}
                   onClick={() => onChange(option.value)}
                   className={cn(
-                    "h-11 rounded-full text-[15px] font-medium transition-[background-color,color,transform] duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal disabled:opacity-50",
+                    "h-11 rounded-full text-[15px] font-medium transition-[background-color,color,transform] duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:opacity-50",
                     selected
                       ? "bg-ink text-white"
-                      : "bg-sheet text-ink ring-1 ring-[#d9d5cd] ring-inset hover:bg-panel-strong"
+                      : "bg-sheet text-ink ring-1 ring-input ring-inset hover:bg-panel-strong"
                   )}
                 >
                   {option.label}
@@ -114,10 +114,10 @@ export function QuestionField({
                   disabled={disabled}
                   onClick={() => onChange(option.charAt(0))}
                   className={cn(
-                    "flex min-h-11 w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left text-[15px] leading-snug transition-[background-color,color,transform] duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] active:scale-[0.99] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal disabled:opacity-50",
+                    "flex min-h-11 w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left text-[15px] leading-snug transition-[background-color,color,transform] duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] active:scale-[0.99] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:opacity-50",
                     selected
                       ? "bg-ink text-white"
-                      : "bg-sheet text-ink ring-1 ring-[#d9d5cd] ring-inset hover:bg-panel-strong"
+                      : "bg-sheet text-ink ring-1 ring-input ring-inset hover:bg-panel-strong"
                   )}
                 >
                   <span
@@ -189,8 +189,8 @@ export function QuestionNavigator({
                 onClick={() => jump(q.id)}
                 aria-label={`Question ${q.id}, ${answered ? "answered" : "not answered"}`}
                 className={cn(
-                  "tabular inline-flex size-11 items-center justify-center rounded-full text-[15px] font-medium transition-[background-color,color,transform] duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] active:scale-[0.95] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal sm:size-10",
-                  answered ? "bg-ink text-white hover:bg-[#2a2926]" : "text-ink ring-1 ring-[#d9d5cd] ring-inset hover:bg-panel-strong"
+                  "tabular inline-flex size-11 items-center justify-center rounded-full text-[15px] font-medium transition-[background-color,color,transform] duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] active:scale-[0.95] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand sm:size-10",
+                  answered ? "bg-ink text-white hover:bg-ink-hover" : "text-ink ring-1 ring-input ring-inset hover:bg-panel-strong"
                 )}
               >
                 {q.id}

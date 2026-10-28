@@ -5,16 +5,16 @@ import { Slot } from "radix-ui"
 import { cn } from "@/lib/utils"
 
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 items-center justify-center gap-2 rounded-full font-medium whitespace-nowrap select-none outline-none transition-[background-color,color,transform] duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal disabled:pointer-events-none disabled:opacity-45 aria-invalid:text-bad [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/button inline-flex shrink-0 items-center justify-center gap-2 rounded-full font-medium whitespace-nowrap select-none outline-none transition-[background-color,color,transform] duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:pointer-events-none disabled:opacity-45 aria-invalid:text-bad [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
-        default: "bg-ink text-white hover:bg-[#2a2926]",
-        accent: "bg-teal text-teal-ink hover:bg-[#1d5b6b]",
-        outline: "bg-panel-strong text-ink hover:bg-[#e2ded6]",
-        secondary: "bg-panel-strong text-ink hover:bg-[#e2ded6]",
+        default: "bg-ink text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.14)] hover:bg-ink-hover",
+        accent: "bg-brand text-brand-ink shadow-[inset_0_1px_0_rgb(255_255_255/0.22),0_1px_2px_rgb(52_82_255/0.3),0_4px_12px_-4px_rgb(52_82_255/0.5)] hover:bg-brand-hover",
+        outline: "bg-panel-strong text-ink hover:bg-panel-hover",
+        secondary: "bg-panel-strong text-ink hover:bg-panel-hover",
         ghost: "text-ink hover:bg-panel-strong",
-        destructive: "bg-bad-tint text-bad hover:bg-[#f2d6d3]",
+        destructive: "bg-bad-tint text-bad hover:bg-bad-tint-hover",
         link: "rounded-none text-ink underline decoration-1 underline-offset-4 hover:decoration-2",
       },
       size: {

@@ -1,20 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { OAUTH_NEXT_PATH_KEY, safeInternalPath } from "@/lib/auth-redirect";
-import { Hero } from "@/components/landing/hero";
+import { Hero, Nav } from "@/components/landing/hero";
 import { BandCalculator } from "@/components/landing/band-calculator";
-import { Stages } from "@/components/landing/stages";
-import { Switches } from "@/components/landing/switches";
+import { Sitting } from "@/components/landing/sitting";
 import { Faq } from "@/components/landing/faq";
 import { Cta, Footer } from "@/components/landing/closing";
 import "@/components/landing/landing.css";
 
 export default function Home() {
   const [currentUser, setCurrentUser] = useState<SupabaseUser | null>(null);
-  const root = useRef<HTMLDivElement>(null);
 
   // Load the session; finish an OAuth return by sending the learner on to where they were going.
   useEffect(() => {
@@ -51,20 +49,15 @@ export default function Home() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Motion starting states apply only once script is running, so the page reads without it.
-  useEffect(() => {
-    root.current?.classList.add("lp-js");
-  }, []);
-
   const signedIn = Boolean(currentUser);
 
   return (
-    <div ref={root} id="top" className="lp min-h-svh w-full">
+    <div id="top" className="lp min-h-svh w-full">
+      <Nav signedIn={signedIn} />
       <Hero signedIn={signedIn} />
       <main>
+        <Sitting />
         <BandCalculator />
-        <Stages />
-        <Switches />
         <Faq />
         <Cta signedIn={signedIn} />
       </main>

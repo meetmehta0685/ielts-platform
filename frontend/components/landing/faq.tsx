@@ -1,6 +1,7 @@
-import type { CSSProperties, ReactNode } from "react";
+"use client";
+
+import { useState, type CSSProperties, type ReactNode } from "react";
 import { Reveal } from "@/components/motion/reveal";
-import { LoopVideo } from "./loop-video";
 
 const QUESTIONS: { q: string; a: ReactNode }[] = [
   {
@@ -70,35 +71,49 @@ const QUESTIONS: { q: string; a: ReactNode }[] = [
 ];
 
 export function Faq() {
+  const [open, setOpen] = useState(0);
   return (
-    <section id="questions" className="lp-section lp-wrap" aria-labelledby="faq-title">
-      <Reveal className="lp-grid lp-faq-row">
-        <h2 id="faq-title" className="lp-faq-q lp-soft t-stagger-line" style={{ "--i": 0 } as CSSProperties}>
-          Questions people ask before they start
+    <section id="questions" className="lp-wrap scroll-mt-28 py-20 lg:py-28" aria-labelledby="faq-title">
+      <Reveal className="grid gap-10 lg:grid-cols-12 lg:gap-6">
+        <h2
+          id="faq-title"
+          className="t-stagger-line max-w-[12ch] font-display text-[36px] text-balance sm:text-[52px] lg:col-span-5"
+          style={{ "--i": 0 } as CSSProperties}
+        >
+          Questions before you start.
         </h2>
-        <figure className="lp-faq-pic t-stagger-line" style={{ "--i": 1 } as CSSProperties}>
-          <div className="lp-frame lp-open">
-            <LoopVideo
-              src="/landing/writing-with-fountain-pen.webm"
-              poster="/landing/writing-with-fountain-pen-poster.jpg"
-              width={854}
-              height={436}
-              label="A hand writing on white paper with a fountain pen"
-            />
-          </div>
-          <figcaption className="lp-caption">Writing with a fountain pen.</figcaption>
-        </figure>
+        <div className="t-stagger-line flex flex-col gap-2 lg:col-span-7" style={{ "--i": 1 } as CSSProperties}>
+          {QUESTIONS.map((item, i) => {
+            const isOpen = open === i;
+            return (
+              <div key={item.q} className="lp-acc rounded-2xl bg-panel" data-open={isOpen}>
+                <h3>
+                  <button
+                    type="button"
+                    id={`faq-q-${i}`}
+                    aria-expanded={isOpen}
+                    aria-controls={`faq-a-${i}`}
+                    onClick={() => setOpen(isOpen ? -1 : i)}
+                    className="flex min-h-14 w-full items-center justify-between gap-4 rounded-2xl px-5 py-3 text-left text-[17px] font-medium transition-colors duration-[var(--duration-quick)] hover:bg-panel-strong"
+                  >
+                    {item.q}
+                    <svg className="lp-acc-chevron size-4 shrink-0 text-soft" viewBox="0 0 16 16" fill="none" aria-hidden>
+                      <path d="M4 6.5L8 10.5L12 6.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </button>
+                </h3>
+                <div id={`faq-a-${i}`} role="region" aria-labelledby={`faq-q-${i}`} className="lp-acc-panel">
+                  <div className="lp-acc-inner">
+                    <div className="flex max-w-[60ch] flex-col gap-3 px-5 pb-5 text-[15px] leading-relaxed text-soft">
+                      {item.a}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </Reveal>
-      {QUESTIONS.map((item) => (
-        <Reveal key={item.q} className="lp-grid lp-faq-row">
-          <h3 className="lp-faq-q t-stagger-line" style={{ "--i": 0 } as CSSProperties}>
-            {item.q}
-          </h3>
-          <div className="lp-faq-a t-stagger-line" style={{ "--i": 1 } as CSSProperties}>
-            {item.a}
-          </div>
-        </Reveal>
-      ))}
     </section>
   );
 }

@@ -289,7 +289,7 @@ function PlanView({
               aria-label="Tasks done"
             >
               <div
-                className="t-progress-fill h-full w-full rounded-full bg-teal"
+                className="t-progress-fill h-full w-full rounded-full bg-brand"
                 style={{ transform: `scaleX(${total ? completed / total : 0})` }}
               />
             </div>

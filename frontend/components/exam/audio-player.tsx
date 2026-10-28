@@ -50,7 +50,7 @@ export function AudioPlayer({
           onClick={onToggle}
           disabled={disabled || status === "error"}
           aria-label={isPlaying ? "Pause recording" : "Play recording"}
-          className="inline-flex size-12 shrink-0 items-center justify-center rounded-full bg-ink text-white transition-[background-color,transform] duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] hover:bg-[#2a2926] active:scale-[0.95] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal disabled:opacity-40"
+          className="inline-flex size-12 shrink-0 items-center justify-center rounded-full bg-ink text-white transition-[background-color,transform] duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] hover:bg-ink-hover active:scale-[0.95] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:opacity-40"
         >
           {isPlaying ? <Pause className="size-5 fill-current" /> : <Play className="ml-0.5 size-5 fill-current" />}
         </button>

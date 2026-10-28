@@ -225,7 +225,7 @@ export function ExamFrame({
             <button
               type="button"
               onClick={onToggleTimer}
-              className="ml-1 hidden h-8 rounded-full px-2.5 text-[13px] text-soft transition-colors duration-[var(--duration-quick)] hover:bg-[#e2dfd8] hover:text-ink md:inline-flex md:items-center"
+              className="ml-1 hidden h-8 rounded-full px-2.5 text-[13px] text-soft transition-colors duration-[var(--duration-quick)] hover:bg-panel-hover hover:text-ink md:inline-flex md:items-center"
             >
               {timerHidden ? "Show time" : "Hide time"}
             </button>
@@ -252,7 +252,7 @@ export function ExamFrame({
           <button
             type="button"
             onClick={() => setConfirmExit(true)}
-            className="inline-flex h-10 items-center rounded-full px-3 text-[14px] text-ink transition-colors duration-[var(--duration-quick)] hover:bg-[#e2dfd8]"
+            className="inline-flex h-10 items-center rounded-full px-3 text-[14px] text-ink transition-colors duration-[var(--duration-quick)] hover:bg-panel-hover"
           >
             Exit
           </button>
@@ -262,9 +262,9 @@ export function ExamFrame({
         </div>
       </header>
 
-      <main className="mx-0 mb-0 flex min-h-0 flex-1 flex-col overflow-hidden bg-sheet sm:mx-2 sm:mb-2 sm:rounded-2xl sm:border sm:border-[#e4e0d8]">
+      <main className="mx-0 mb-0 flex min-h-0 flex-1 flex-col overflow-hidden bg-sheet sm:mx-2 sm:mb-2 sm:rounded-2xl sm:border sm:border-border">
         <div className="min-h-0 flex-1">{children}</div>
-        {footer && <div className="shrink-0 border-t border-[#ebe8e2]">{footer}</div>}
+        {footer && <div className="shrink-0 border-t border-border">{footer}</div>}
       </main>
 
       <ConfirmDialog
@@ -333,7 +333,7 @@ export function SplitPane({
   };
   return (
     <div className="flex h-full flex-col lg:flex-row">
-      <div className="flex shrink-0 justify-center border-b border-[#ebe8e2] px-4 py-2.5 lg:hidden">
+      <div className="flex shrink-0 justify-center border-b border-border px-4 py-2.5 lg:hidden">
         <SegmentedControl
           label="Show"
           value={pane}
@@ -361,7 +361,7 @@ export function SplitPane({
       <section
         aria-label={rightLabel}
         className={cn(
-          "min-h-0 flex-1 overflow-y-auto bg-panel lg:block lg:flex-none lg:border-l lg:border-[#ebe8e2]",
+          "min-h-0 flex-1 overflow-y-auto bg-panel lg:block lg:flex-none lg:border-l lg:border-border",
           rightWidth,
           pane === "right" ? "block" : "hidden"
         )}

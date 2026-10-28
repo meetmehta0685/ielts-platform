@@ -711,7 +711,7 @@ function SpeakingPageContent() {
               {currentPart.cue ? (
                 <CueCard {...currentPart.cue} />
               ) : (
-                <section className="rounded-2xl border border-[#d9d3c9] bg-sheet p-6 sm:p-8">
+                <section className="rounded-2xl border border-border bg-sheet p-6 sm:p-8">
                   <p className="mb-5 text-sm text-soft">The examiner asks</p>
                   <p className="text-[22px] leading-snug font-medium text-ink sm:text-[24px]">{currentPart.question}</p>
                 </section>
@@ -767,7 +767,7 @@ function SpeakingPageContent() {
                   aria-hidden
                   className={cn(
                     "size-2.5 rounded-full motion-reduce:animate-none",
-                    phase === "recording" ? "animate-pulse bg-teal" : "bg-ink"
+                    phase === "recording" ? "animate-pulse bg-brand" : "bg-ink"
                   )}
                 />
               )}
@@ -788,15 +788,15 @@ function SpeakingPageContent() {
               </p>
               <p className="mt-3 text-[15px] text-soft">{bigCaption}</p>
               {phase === "recording" && (
-                <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-putty" aria-hidden>
+                <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-panel-strong" aria-hidden>
                   <div
-                    className="h-full rounded-full bg-teal transition-[width] duration-1000 ease-linear motion-reduce:transition-none"
+                    className="h-full rounded-full bg-brand transition-[width] duration-1000 ease-linear motion-reduce:transition-none"
                     style={{ width: `${Math.min(1, recordingSeconds / limitSeconds) * 100}%` }}
                   />
                 </div>
               )}
               {phase === "preparing" && (
-                <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-putty" aria-hidden>
+                <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-panel-strong" aria-hidden>
                   <div
                     className="h-full rounded-full bg-ink transition-[width] duration-1000 ease-linear motion-reduce:transition-none"
                     style={{ width: `${((60 - prepSeconds) / 60) * 100}%` }}

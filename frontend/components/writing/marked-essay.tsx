@@ -68,10 +68,10 @@ export function MarkedEssay({ essayText, corrections }: { essayText: string; cor
       <span
         key={`corr-${i}`}
         tabIndex={0}
-        className="group/fix relative rounded-[4px] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal"
+        className="group/fix relative rounded-[4px] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
       >
         <del className="text-soft decoration-bad decoration-[1.5px]">{match.original}</del>{" "}
-        <ins className="rounded-[4px] bg-teal-tint px-0.5 text-ink no-underline">{match.correction}</ins>
+        <ins className="rounded-[4px] bg-brand-tint px-0.5 text-ink no-underline">{match.correction}</ins>
         {match.explanation && (
           <span
             role="tooltip"

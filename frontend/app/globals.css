@@ -6,23 +6,30 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: "General Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Gambarino", ui-serif, Georgia, serif;
+  --font-display: "General Sans", ui-sans-serif, system-ui, sans-serif;
   --font-heading: var(--font-display);
 
-  --color-putty: var(--putty);
-  --color-putty-deep: var(--putty-deep);
   --color-chrome: var(--chrome);
   --color-sheet: var(--sheet);
   --color-panel: var(--panel);
   --color-panel-strong: var(--panel-strong);
+  --color-panel-hover: var(--panel-hover);
+  --color-line-strong: var(--line-strong);
   --color-ink: var(--ink);
+  --color-ink-hover: var(--ink-hover);
   --color-soft: var(--soft);
-  --color-teal: var(--teal);
-  --color-teal-ink: var(--teal-ink);
-  --color-teal-tint: var(--teal-tint);
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-ink: var(--brand-ink);
+  --color-brand-tint: var(--brand-tint);
   --color-good: var(--good);
   --color-bad: var(--bad);
   --color-bad-tint: var(--bad-tint);
+  --color-bad-tint-hover: var(--bad-tint-hover);
+  --color-listening: var(--listening);
+  --color-reading: var(--reading);
+  --color-writing: var(--writing);
+  --color-speaking: var(--speaking);
 
   --color-ring: var(--ring);
   --color-input: var(--input);
@@ -40,17 +47,20 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
-  --color-chart-1: var(--teal);
+  --color-chart-1: var(--brand);
   --color-chart-2: var(--ink);
   --color-chart-3: var(--soft);
 
-  --radius-sm: 6px;
-  --radius-md: 8px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
   --radius-lg: var(--radius);
-  --radius-xl: 14px;
-  --radius-2xl: 16px;
-  --radius-3xl: 16px;
-  --radius-4xl: 16px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --radius-3xl: 24px;
+  --radius-4xl: 28px;
+
+  --shadow-tile: var(--tile-shadow);
+  --shadow-lift: var(--lift-shadow);
 
   --text-step-small: var(--step-small);
   --text-step-body: var(--step-body);
@@ -59,23 +69,34 @@
 }
 
 :root {
-  /* Page palette: putty ground, black ink, one teal accent for the action. */
-  --putty: #dedad3;
-  --putty-deep: #d3cec6;
-  --ink: #0a0a0a;
-  --soft: #5c5852;
-  --teal: #256f82;
-  --teal-ink: #ffffff;
-  --teal-tint: #e3eef1;
-
-  /* App surfaces: putty-tinted chrome frame, white sheet, one tonal panel step. */
-  --chrome: #ebe8e2;
+  /* A cool light ground, white tiles with a hairline ring, black ink and one electric blue for the action. */
+  --chrome: #f3f3f5;
   --sheet: #ffffff;
-  --panel: #f5f3ef;
-  --panel-strong: #ece9e3;
-  --good: #2f7a4d;
-  --bad: #b3261e;
-  --bad-tint: #f8e6e4;
+  --panel: #f6f6f8;
+  --panel-strong: #eeeef2;
+  --panel-hover: #e6e6ec;
+  --line-strong: #c9c9d3;
+  --ink: #0c0c12;
+  --ink-hover: #2a2a33;
+  --soft: #62626d;
+  --brand: #3452ff;
+  --brand-hover: #2440e6;
+  --brand-ink: #ffffff;
+  --brand-tint: #ebeeff;
+  --good: #0f9d58;
+  --bad: #e5484d;
+  --bad-tint: #fdecec;
+  --bad-tint-hover: #fadcdd;
+
+  /* One hue per module, used only to mark that module's data: its dot, its chart line, its tile. */
+  --listening: #ff6b35;
+  --reading: #8b5cf6;
+  --writing: #10b981;
+  --speaking: #ec4899;
+
+  /* Tiles are white with a 1px ring and a breath of shadow; they lift on hover. */
+  --tile-shadow: 0 0 0 1px rgb(12 12 18 / 0.06), 0 1px 2px rgb(12 12 18 / 0.04), 0 2px 6px -2px rgb(12 12 18 / 0.04);
+  --lift-shadow: 0 0 0 1px rgb(12 12 18 / 0.07), 0 8px 24px -8px rgb(12 12 18 / 0.14), 0 2px 6px -2px rgb(12 12 18 / 0.06);
 
   --background: var(--sheet);
   --foreground: var(--ink);
@@ -92,10 +113,10 @@
   --accent: var(--panel-strong);
   --accent-foreground: var(--ink);
   --destructive: var(--bad);
-  --border: #e6e2db;
-  --input: #ddd8d0;
-  --ring: var(--teal);
-  --radius: 10px;
+  --border: #e7e7ec;
+  --input: #dcdce3;
+  --ring: var(--brand);
+  --radius: 12px;
 
   --step-small: clamp(0.8125rem, 0.79rem + 0.1vw, 0.875rem);
   --step-body: clamp(1.0625rem, 1rem + 0.25vw, 1.1875rem);
@@ -135,24 +156,46 @@
   }
   body {
     @apply bg-background text-foreground;
+    letter-spacing: -0.005em;
     font-size: 16px;
     line-height: 1.5;
   }
   ::selection {
-    background: var(--teal);
-    color: var(--teal-ink);
+    background: var(--brand);
+    color: var(--brand-ink);
   }
   :focus-visible {
-    outline: 2px solid var(--teal);
+    outline: 2px solid var(--brand);
     outline-offset: 2px;
   }
 }
 
 @utility font-display {
   font-family: var(--font-display);
-  font-weight: 400;
-  letter-spacing: -0.02em;
-  line-height: 0.92;
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 1;
+}
+
+/* A white tile on the chrome ground: hairline ring, faint shadow. `tile-hover` lifts it under the pointer. */
+@utility tile {
+  background: var(--sheet);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--tile-shadow);
+}
+@utility tile-hover {
+  transition:
+    box-shadow var(--duration-fast) var(--ease-smooth-out),
+    transform var(--duration-fast) var(--ease-smooth-out);
+  &:hover {
+    box-shadow: var(--lift-shadow);
+    transform: translateY(-2px);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    &:hover {
+      transform: none;
+    }
+  }
 }
 
 @utility tabular {

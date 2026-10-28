@@ -20,14 +20,14 @@ export interface BandPoint {
   title: string;
 }
 
-const TEAL = "#256f82";
-const SOFT = "#5c5852";
-const GRID = "#ebe8e2";
+const BRAND = "var(--brand)";
+const SOFT = "var(--soft)";
+const GRID = "var(--border)";
 
 const shortDate = (t: number) => new Date(t).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 
 /**
- * Band per marked attempt over time against the target line. One series in teal, straight
+ * Band per marked attempt over time against the target line. One series in the brand colour, straight
  * segments, every mark labelled with its band; the latest mark is the larger dot.
  */
 export function BandTrend({ points, target }: { points: BandPoint[]; target: number }) {
@@ -72,7 +72,7 @@ export function BandTrend({ points, target }: { points: BandPoint[]; target: num
             tickFormatter={shortDate}
             tick={{ fontSize: 13, fill: SOFT }}
             tickLine={false}
-            axisLine={{ stroke: "#d9d5ce" }}
+            axisLine={{ stroke: "var(--input)" }}
             tickMargin={8}
           />
           <YAxis
@@ -106,15 +106,15 @@ export function BandTrend({ points, target }: { points: BandPoint[]; target: num
           <Line
             type="linear"
             dataKey="band"
-            stroke={TEAL}
+            stroke={BRAND}
             strokeWidth={2}
             isAnimationActive={false}
             dot={(props) => {
               const { cx, cy, index } = props as { cx: number; cy: number; index: number };
               const latest = index === lastIndex;
-              return <circle key={index} cx={cx} cy={cy} r={latest ? 5 : 3} fill={latest ? TEAL : "#fff"} stroke={TEAL} strokeWidth={2} />;
+              return <circle key={index} cx={cx} cy={cy} r={latest ? 5 : 3} fill={latest ? BRAND : "#fff"} stroke={BRAND} strokeWidth={2} />;
             }}
-            activeDot={{ r: 5, fill: TEAL, stroke: "#fff", strokeWidth: 2 }}
+            activeDot={{ r: 5, fill: BRAND, stroke: "#fff", strokeWidth: 2 }}
           >
             <LabelList
               dataKey="band"
@@ -133,7 +133,7 @@ export function BandTrend({ points, target }: { points: BandPoint[]; target: num
                     dx={latest && index > 0 && Number(value) < points[index - 1].band ? 16 : 0}
                     textAnchor="middle"
                     fontSize={13}
-                    fill={latest ? TEAL : SOFT}
+                    fill={latest ? BRAND : SOFT}
                     fontWeight={latest ? 600 : 400}
                     stroke="#fff"
                     strokeWidth={4}

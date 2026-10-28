@@ -32,7 +32,7 @@ const completeProfileSchema = z.object({
 type CompleteProfileValues = z.infer<typeof completeProfileSchema>;
 
 const selectClass =
-  "h-10 w-full cursor-pointer rounded-[10px] border border-input bg-sheet px-3 text-[15px] text-ink outline-none transition-[border-color] duration-[var(--duration-quick)] hover:border-[#c9c4bb] focus-visible:border-teal disabled:opacity-50 aria-invalid:border-bad";
+  "h-10 w-full cursor-pointer rounded-[10px] border border-input bg-sheet px-3 text-[15px] text-ink outline-none transition-[border-color] duration-[var(--duration-quick)] hover:border-line-strong focus-visible:border-brand disabled:opacity-50 aria-invalid:border-bad";
 const labelClass = "text-sm font-medium text-ink";
 const messageClass = "text-[13px] font-normal text-bad";
 
@@ -124,7 +124,7 @@ export default function CompleteProfilePage() {
       <header className="flex h-16 items-center justify-between border-b border-border px-4 sm:px-8">
         <Link
           href={hasProfile ? "/dashboard" : "/"}
-          className="-mx-2 flex items-center gap-2.5 rounded-full px-2 py-1.5 transition-colors duration-[var(--duration-quick)] hover:bg-panel focus-visible:outline-2 focus-visible:outline-teal"
+          className="-mx-2 flex items-center gap-2.5 rounded-full px-2 py-1.5 transition-colors duration-[var(--duration-quick)] hover:bg-panel focus-visible:outline-2 focus-visible:outline-brand"
         >
           <ProductMark />
           <span className="text-[15px] font-medium text-ink">IELTS Prep</span>
@@ -138,7 +138,7 @@ export default function CompleteProfilePage() {
 
       <main className="mx-auto w-full max-w-[1132px] px-4 pt-8 pb-20 sm:px-6 lg:pt-[72px]">
         <div className="mb-10 max-w-[760px] lg:mb-12">
-          <h1 className="font-display text-[34px] text-ink sm:text-[48px]">
+          <h1 className="font-display text-[32px] text-balance text-ink sm:text-[44px]">
             {hasProfile ? "Your exam and targets." : name ? `${name}, tell us about your exam.` : "Tell us about your exam."}
           </h1>
           <p className="mt-3 text-[17px] leading-normal text-soft">
@@ -265,8 +265,8 @@ export default function CompleteProfilePage() {
                                 field.onChange(updated);
                               }}
                               className={cn(
-                                "inline-flex h-10 items-center gap-1.5 rounded-full px-4 text-[15px] transition-[background-color,color,transform] duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal disabled:opacity-50",
-                                isSelected ? "bg-ink text-white hover:bg-[#2a2926]" : "bg-sheet text-ink ring-1 ring-input hover:bg-panel-strong"
+                                "inline-flex h-10 items-center gap-1.5 rounded-full px-4 text-[15px] transition-[background-color,color,transform] duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:opacity-50",
+                                isSelected ? "bg-ink text-white hover:bg-ink-hover" : "bg-sheet text-ink ring-1 ring-input hover:bg-panel-strong"
                               )}
                             >
                               {isSelected && <Check aria-hidden className="t-swap size-4" />}

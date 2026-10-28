@@ -147,7 +147,7 @@ export function ChatInput({
   return (
     <div className="shrink-0 bg-sheet px-4 pt-2 pb-4 sm:px-6 sm:pb-6">
       <div className="mx-auto max-w-[720px]">
-        <div className="flex items-end gap-2 rounded-[22px] border border-input bg-sheet p-2 pl-4 transition-[border-color] duration-[var(--duration-quick)] focus-within:border-teal">
+        <div className="flex items-end gap-2 rounded-[22px] border border-input bg-sheet p-2 pl-4 transition-[border-color] duration-[var(--duration-quick)] focus-within:border-brand">
           <label htmlFor="mentor-question" className="sr-only">
             Your question for the mentor
           </label>

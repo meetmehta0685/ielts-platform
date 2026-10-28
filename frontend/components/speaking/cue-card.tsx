@@ -12,7 +12,7 @@ export function CueCard({
   closing: string;
 }) {
   return (
-    <article className="rounded-2xl border border-[#d9d3c9] bg-sheet p-6 sm:p-8">
+    <article className="rounded-2xl border border-border bg-sheet p-6 sm:p-8">
       <p className="mb-5 text-sm text-soft">Part 2 cue card</p>
       <h2 className="text-[22px] leading-snug font-medium text-ink sm:text-[24px]">{topic}</h2>
       <p className="mt-5 text-[17px] text-ink">You should say:</p>

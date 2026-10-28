@@ -112,7 +112,7 @@ export function ChatSidebar({
                       }
                     }}
                     className={cn(
-                      "flex min-h-11 w-full items-baseline justify-between gap-3 rounded-[10px] px-3 py-2.5 text-left transition-colors duration-[var(--duration-quick)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-teal",
+                      "flex min-h-11 w-full items-baseline justify-between gap-3 rounded-[10px] px-3 py-2.5 text-left transition-colors duration-[var(--duration-quick)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-brand",
                       isActive ? "bg-panel-strong" : "hover:bg-panel"
                     )}
                   >

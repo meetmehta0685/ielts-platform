@@ -7,6 +7,7 @@ import { AppShell, PageColumn } from "@/components/app/app-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { TrackRecordEntry } from "@/lib/track-record";
+import { MODULE_HUE } from "@/lib/module-hue";
 import { cn } from "@/lib/utils";
 import { attemptHref, bandOf, formatBand } from "./record-utils";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -166,8 +167,11 @@ export function RecordsList({ initialRecords }: RecordsListProps) {
                     i === 2 && "lg:border-l"
                   )}
                 >
-                  <span className="text-[15px] font-medium text-ink">{m.mod}</span>
-                  <span className="tabular text-[30px] leading-none text-ink">
+                  <span className="flex items-center gap-2 text-[15px] font-medium text-ink">
+                    <span aria-hidden className={cn("size-2 rounded-full", MODULE_HUE[m.mod])} />
+                    {m.mod}
+                  </span>
+                  <span className="tabular font-display text-[36px] text-ink">
                     {m.latest != null ? m.latest.toFixed(1) : "—"}
                   </span>
                   <span className="text-sm text-soft">
@@ -206,7 +210,7 @@ export function RecordsList({ initialRecords }: RecordsListProps) {
                   <select
                     value={sortBy}
                     onChange={handleSortChange}
-                    className="h-10 cursor-pointer rounded-[10px] border border-input bg-sheet px-3 text-[15px] text-ink transition-[border-color] duration-[var(--duration-quick)] outline-none hover:border-[#c9c4bb] focus-visible:border-teal"
+                    className="h-10 cursor-pointer rounded-[10px] border border-input bg-sheet px-3 text-[15px] text-ink transition-[border-color] duration-[var(--duration-quick)] outline-none hover:border-line-strong focus-visible:border-brand"
                   >
                     {SORTS.map((s) => (
                       <option key={s.value} value={s.value}>
@@ -239,7 +243,7 @@ export function RecordsList({ initialRecords }: RecordsListProps) {
                 {/* Desktop and tablet: a real table */}
                 <table className="mt-2 hidden w-full border-collapse text-[15px] md:table">
                   <thead>
-                    <tr className="border-b border-[#ddd8d0] text-left text-sm text-soft">
+                    <tr className="border-b border-border text-left text-sm text-soft">
                       <th scope="col" className="h-10 w-[120px] pr-4 font-normal">
                         <span className="inline-flex items-center gap-1">
                           Date
@@ -264,7 +268,12 @@ export function RecordsList({ initialRecords }: RecordsListProps) {
                         className="group border-b border-border transition-colors duration-[var(--duration-quick)] hover:bg-panel"
                       >
                         <td className="tabular h-12 pr-4 text-soft">{fullDate(record.date)}</td>
-                        <td className="h-12 pr-4 text-soft">{record.module}</td>
+                        <td className="h-12 pr-4 text-soft">
+                          <span className="inline-flex items-center gap-2">
+                            <span aria-hidden className={cn("size-1.5 rounded-full", MODULE_HUE[record.module])} />
+                            {record.module}
+                          </span>
+                        </td>
                         <td className="h-12 pr-4">
                           <Link
                             href={attemptHref(record)}

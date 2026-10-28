@@ -104,7 +104,7 @@ export function SegmentedControl<T extends string>({
             disabled={disabled}
             onClick={() => !active && onChange(option.value)}
             className={cn(
-              "relative z-[1] rounded-full px-4 whitespace-nowrap outline-none transition-colors duration-[var(--duration-fast)] ease-[var(--ease-smooth-out)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal disabled:cursor-not-allowed",
+              "relative z-[1] rounded-full px-4 whitespace-nowrap outline-none transition-colors duration-[var(--duration-fast)] ease-[var(--ease-smooth-out)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed",
               height,
               active ? "font-medium text-ink" : "text-soft hover:text-ink"
             )}

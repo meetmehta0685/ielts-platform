@@ -486,7 +486,7 @@ function WritingPageContent() {
                           aria-pressed={selected}
                           onClick={() => handleSelectSample(sample)}
                           className={cn(
-                            "block w-full rounded-xl px-3.5 py-3 text-left text-[15px] leading-snug transition-colors duration-[var(--duration-quick)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal",
+                            "block w-full rounded-xl px-3.5 py-3 text-left text-[15px] leading-snug transition-colors duration-[var(--duration-quick)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand",
                             selected ? "bg-sheet text-ink shadow-[0_0_0_1px_var(--border)]" : "text-soft hover:bg-panel-strong hover:text-ink"
                           )}
                         >
@@ -545,7 +545,7 @@ function WritingPageContent() {
                 </p>
                 <div className="h-1.5 overflow-hidden rounded-full bg-panel-strong" aria-hidden>
                   <div
-                    className="h-full rounded-full bg-teal transition-[width] duration-[var(--duration-fast)] ease-[var(--ease-smooth-out)] motion-reduce:transition-none"
+                    className="h-full rounded-full bg-brand transition-[width] duration-[var(--duration-fast)] ease-[var(--ease-smooth-out)] motion-reduce:transition-none"
                     style={{ width: `${Math.min(1, wordCount / target) * 100}%` }}
                   />
                 </div>
@@ -555,7 +555,7 @@ function WritingPageContent() {
             {isGrading ? (
               <section className="rounded-2xl border border-border bg-sheet p-5 sm:p-8" aria-busy>
                 <div className="mb-6 flex items-center gap-3">
-                  <span aria-hidden className="size-2 animate-pulse rounded-full bg-teal motion-reduce:animate-none" />
+                  <span aria-hidden className="size-2 animate-pulse rounded-full bg-brand motion-reduce:animate-none" />
                   <ThinkingStatus states={marking} className="text-[17px]" />
                 </div>
                 <p className="max-w-[70ch] whitespace-pre-wrap text-[17px] leading-[1.75] text-soft">{essay}</p>
@@ -563,7 +563,7 @@ function WritingPageContent() {
               </section>
             ) : (
               <form onSubmit={handleEvaluate} className="flex flex-col gap-4">
-                <div className="rounded-2xl border border-border bg-sheet focus-within:border-[#c9c3b9]">
+                <div className="rounded-2xl border border-border bg-sheet focus-within:border-brand">
                   <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-3 sm:px-8">
                     <p className="text-sm text-soft">
                       <span className="text-ink capitalize">{candidateName}</span>

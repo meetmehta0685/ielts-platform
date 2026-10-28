@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 
-/** A read-only tick for a study-plan task: filled teal with a check when done, an empty box when not. */
+/** A read-only tick for a study-plan task: filled brand blue with a check when done, an empty box when not. */
 export function PlanTick({ done }: { done: boolean }) {
   return (
     <span
@@ -8,7 +8,7 @@ export function PlanTick({ done }: { done: boolean }) {
       aria-label={done ? "Done" : "Not done"}
       className={cn(
         "mt-px inline-flex size-[18px] shrink-0 items-center justify-center rounded-[5px]",
-        done ? "bg-teal" : "border-[1.5px] border-[#c9c4bb] bg-sheet"
+        done ? "bg-brand" : "border-[1.5px] border-line-strong bg-sheet"
       )}
     >
       {done && (

@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { requireServerUser } from "@/lib/supabase-server";
 import { loadTrackRecord, type TrackRecordEntry } from "@/lib/track-record";
 import { AppShell, PageColumn, Panel } from "@/components/app/app-shell";
+import { MODULE_HUE } from "@/lib/module-hue";
 import { Reveal } from "@/components/motion/reveal";
 import { Button } from "@/components/ui/button";
 import { BandTrend, type BandPoint } from "@/components/dashboard/band-trend";
@@ -152,16 +153,22 @@ export default async function DashboardPage() {
               key={m.key}
               href={`/${m.key}`}
               style={stagger(i)}
-              className="t-stagger-line group col-span-1 flex min-h-[128px] flex-col justify-between rounded-2xl bg-panel p-4 transition-colors duration-[var(--duration-quick)] hover:bg-panel-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal lg:col-span-3"
+              className="t-stagger-line tile tile-hover group col-span-1 flex min-h-[136px] flex-col justify-between p-5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand lg:col-span-3"
             >
-              <span className="flex items-baseline justify-between text-[15px] font-medium text-ink">
-                {m.name}
-                <span aria-hidden className="text-soft opacity-0 transition-opacity duration-[var(--duration-quick)] group-hover:opacity-100">
-                  Practise
+              <span className="flex items-center justify-between text-[15px] font-medium text-ink">
+                <span className="flex items-center gap-2">
+                  <span aria-hidden className={`size-2 rounded-full ${MODULE_HUE[m.name]}`} />
+                  {m.name}
+                </span>
+                <span
+                  aria-hidden
+                  className="translate-x-[-4px] text-sm text-soft opacity-0 transition-[opacity,transform] duration-[var(--duration-fast)] ease-[var(--ease-smooth-out)] group-hover:translate-x-0 group-hover:opacity-100"
+                >
+                  Practise →
                 </span>
               </span>
               <span>
-                <span className="tabular block text-[30px] leading-none text-ink">
+                <span className="tabular block font-display text-[36px] text-ink">
                   {m.avg != null ? m.avg.toFixed(1) : "—"}
                 </span>
                 <span className="mt-2 block text-sm text-soft">
@@ -286,7 +293,7 @@ export default async function DashboardPage() {
                     <span className="relative h-2 rounded-full bg-panel-strong" aria-hidden>
                       {m.avg != null && (
                         <span
-                          className={`absolute inset-y-0 left-0 rounded-full ${focus ? "bg-ink" : "bg-[#a8a299]"}`}
+                          className={`absolute inset-y-0 left-0 rounded-full ${MODULE_HUE[m.name]} ${focus ? "" : "opacity-35"}`}
                           style={{ width: pos(m.avg) }}
                         />
                       )}
@@ -338,11 +345,12 @@ function RecentRow({ record }: { record: TrackRecordEntry }) {
     <li>
       <Link
         href={attemptHref(record)}
-        className="flex items-center justify-between gap-4 rounded-[10px] px-2 py-2.5 transition-colors duration-[var(--duration-quick)] hover:bg-panel-strong focus-visible:outline-2 focus-visible:outline-teal"
+        className="flex items-center justify-between gap-4 rounded-[10px] px-2 py-2.5 transition-colors duration-[var(--duration-quick)] hover:bg-panel-strong focus-visible:outline-2 focus-visible:outline-brand"
       >
         <span className="min-w-0">
           <span className="block truncate text-[15px] text-ink">{record.title}</span>
-          <span className="block text-sm text-soft">
+          <span className="flex items-center gap-1.5 text-sm text-soft">
+            <span aria-hidden className={`size-1.5 rounded-full ${MODULE_HUE[record.module] ?? "bg-line-strong"}`} />
             {record.module} · {shortDate(record.date)}
           </span>
         </span>

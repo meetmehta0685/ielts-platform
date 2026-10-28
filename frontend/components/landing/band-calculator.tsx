@@ -2,6 +2,7 @@
 
 import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Reveal } from "@/components/motion/reveal";
+import { MODULE_HUE } from "@/lib/module-hue";
 import { MODULES, formatBand, formatMean, overallBand, parseBands } from "./band";
 
 const START = "7.5 6.5 6 6.5";
@@ -29,7 +30,7 @@ export function BandCalculator() {
     if (!m || !i) return;
     const measure = () => {
       const w = m.getBoundingClientRect().width;
-      setCaretX(w + 6 < i.clientWidth ? w + 6 : null);
+      setCaretX(w + 46 < i.clientWidth ? w + 6 : null);
     };
     measure();
     window.addEventListener("resize", measure);
@@ -43,82 +44,23 @@ export function BandCalculator() {
   };
 
   return (
-    <section id="your-bands" className="lp-section lp-wrap" aria-labelledby="bands-title">
-      <Reveal className="lp-grid">
-        <h2 id="bands-title" className="lp-showcase-title lp-lead t-stagger-line" style={{ "--i": 0 } as CSSProperties}>
-          <label htmlFor="bands-input">Type your four module bands, in report order.</label>
-        </h2>
-
-        <div className="lp-typed t-stagger-line" style={{ "--i": 1 } as CSSProperties} data-ui>
-          <input
-            ref={input}
-            id="bands-input"
-            type="text"
-            inputMode="decimal"
-            autoComplete="off"
-            spellCheck={false}
-            value={value}
-            onChange={(e) => {
-              setValue(e.target.value);
-              setChanges((c) => c + 1);
-            }}
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
-            aria-describedby="bands-result"
-          />
-          <span ref={mirror} className="lp-mirror" aria-hidden="true">
-            {value}
-          </span>
-          {!focused && caretX !== null && (
-            <span className="lp-caret" style={{ left: caretX }} aria-hidden="true" />
-          )}
-          <div className="lp-typed-rule" aria-hidden="true" />
-        </div>
-
-        <div className="lp-answer t-stagger-line" style={{ "--i": 2 } as CSSProperties}>
-          <div className="lp-trf" data-ui>
-            <div className="lp-trf-head">
-              <span>Test Report Form, estimated</span>
-              <span>Academic</span>
-            </div>
-            <div className="lp-trf-row" role="group" aria-label="Module bands and Overall band">
-              {MODULES.map((name, i) => (
-                <div className="lp-trf-cell" key={name}>
-                  <div className="lp-trf-label">{name}</div>
-                  <div className="lp-trf-figure">
-                    <span key={`${changes}-${i}`} className={parsed.ok ? "t-pop" : undefined}>
-                      {parsed.ok ? formatBand(parsed.bands[i]) : "—"}
-                    </span>
-                  </div>
-                </div>
-              ))}
-              <div className="lp-trf-cell">
-                <div className="lp-trf-label">Overall band</div>
-                <div className="lp-trf-figure">
-                  <span key={`o-${result?.overall ?? "x"}`} className={result ? "t-pop" : undefined}>
-                    {result ? formatBand(result.overall) : "—"}
-                  </span>
-                </div>
-              </div>
-            </div>
-            <p id="bands-result" className={`lp-trf-why ${parsed.ok ? "" : "lp-trf-error"}`} aria-live="polite">
-              {parsed.ok && result ? (
-                <>
-                  ({parsed.bands.map(formatBand).join(" + ")}) ÷ 4 = {formatMean(result.mean)}. {result.why}
-                </>
-              ) : (
-                !parsed.ok && parsed.message
-              )}
-            </p>
-          </div>
-
-          <div className="lp-examples">
-            <span className="lp-small lp-soft">Try</span>
+    <section id="your-bands" className="lp-wrap scroll-mt-28 py-20 lg:py-28" aria-labelledby="bands-title">
+      <Reveal className="grid items-start gap-10 lg:grid-cols-12 lg:gap-6">
+        <div className="t-stagger-line lg:col-span-5" style={{ "--i": 0 } as CSSProperties}>
+          <h2 id="bands-title" className="max-w-[14ch] font-display text-[36px] text-balance sm:text-[52px]">
+            Work out an Overall band.
+          </h2>
+          <p className="mt-4 max-w-[36ch] text-[17px] text-soft">
+            <label htmlFor="bands-input">Type your four module bands in report order.</label> The rounding follows the
+            published rule, quarters and all.
+          </p>
+          <div className="mt-6 flex flex-wrap items-center gap-2">
+            <span className="text-[14px] text-soft">Try</span>
             {EXAMPLES.map((ex) => (
               <button
                 key={ex.value}
                 type="button"
-                className="lp-example"
+                className="tabular h-9 rounded-full bg-panel-strong px-3.5 text-[14px] transition-[background-color,transform] duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] hover:bg-panel-hover active:scale-[0.97]"
                 onClick={() => fill(ex.value)}
                 aria-label={`Fill in ${ex.value}, which ${ex.note}`}
               >
@@ -128,21 +70,79 @@ export function BandCalculator() {
           </div>
         </div>
 
-        <figure className="lp-answer-photo t-stagger-line" style={{ "--i": 3 } as CSSProperties}>
-          <div className="lp-frame lp-open">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              className="lp-photo"
-              src="/landing/side-view-of-students-writing-examination-in.jpg"
-              width={1920}
-              height={1083}
-              alt="Candidates writing an examination at rows of desks, seen from the side of the room"
-              loading="lazy"
-              style={{ objectPosition: "28% 40%" }}
+        <div className="t-stagger-line tile p-5 sm:p-7 lg:col-span-7" style={{ "--i": 1 } as CSSProperties}>
+          <div className="relative">
+            <input
+              ref={input}
+              id="bands-input"
+              type="text"
+              inputMode="decimal"
+              autoComplete="off"
+              spellCheck={false}
+              value={value}
+              onChange={(e) => {
+                setValue(e.target.value);
+                setChanges((c) => c + 1);
+              }}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
+              aria-describedby="bands-result"
+              className="tabular h-16 w-full rounded-2xl bg-panel px-5 font-display text-[28px] caret-brand outline-none ring-brand transition-shadow duration-[var(--duration-quick)] focus:ring-2 sm:text-[34px]"
             />
+            <span
+              ref={mirror}
+              className="tabular pointer-events-none invisible absolute top-0 left-5 font-display text-[28px] whitespace-pre sm:text-[34px]"
+              aria-hidden="true"
+            >
+              {value}
+            </span>
+            {!focused && caretX !== null && (
+              <span
+                className="lp-caret pointer-events-none absolute top-1/2 h-8 w-[3px] -translate-y-1/2 rounded-full bg-brand"
+                style={{ left: caretX + 20 }}
+                aria-hidden="true"
+              />
+            )}
           </div>
-          <figcaption className="lp-caption">An examination at Augustine University, Lagos, February 2025.</figcaption>
-        </figure>
+
+          <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-5" role="group" aria-label="Module bands and Overall band">
+            {MODULES.map((name, i) => (
+              <div key={name} className="rounded-2xl bg-panel p-3.5">
+                <div className="flex items-center gap-1.5 text-[13px] text-soft">
+                  <span aria-hidden className={`size-1.5 rounded-full ${MODULE_HUE[name]}`} />
+                  {name}
+                </div>
+                <div className="tabular mt-2 font-display text-[28px]">
+                  <span key={`${changes}-${i}`} className={parsed.ok ? "t-pop" : undefined}>
+                    {parsed.ok ? formatBand(parsed.bands[i]) : "—"}
+                  </span>
+                </div>
+              </div>
+            ))}
+            <div className="col-span-2 rounded-2xl bg-brand p-3.5 text-white sm:col-span-1">
+              <div className="text-[13px] text-white/80">Overall band</div>
+              <div className="tabular mt-2 font-display text-[28px]">
+                <span key={`o-${result?.overall ?? "x"}`} className={result ? "t-pop" : undefined}>
+                  {result ? formatBand(result.overall) : "—"}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <p
+            id="bands-result"
+            className={`mt-4 min-h-[3em] text-[14px] ${parsed.ok ? "text-soft" : "text-bad"}`}
+            aria-live="polite"
+          >
+            {parsed.ok && result ? (
+              <>
+                ({parsed.bands.map(formatBand).join(" + ")}) ÷ 4 = {formatMean(result.mean)}. {result.why}
+              </>
+            ) : (
+              !parsed.ok && parsed.message
+            )}
+          </p>
+        </div>
       </Reveal>
     </section>
   );
