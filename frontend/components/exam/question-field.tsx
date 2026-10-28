@@ -87,7 +87,7 @@ export function QuestionField({
                   disabled={disabled}
                   onClick={() => onChange(option.value)}
                   className={cn(
-                    "h-11 rounded-full text-[15px] font-medium transition-[background-color,color,transform] duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:opacity-50",
+                    "h-11 rounded-[10px] text-[15px] font-medium transition-[background-color,color,transform] duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:opacity-50",
                     selected
                       ? "bg-ink text-white"
                       : "bg-sheet text-ink ring-1 ring-input ring-inset hover:bg-panel-strong"

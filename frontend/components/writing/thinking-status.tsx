@@ -4,10 +4,9 @@ import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * An AI status line that narrates the work (transitions recipe 28, adapted): the current state
- * shimmers while it holds, and each new state rises in through a small blur. Pass one state to
- * hold it; pass several to cycle every `holdMs`. Both animations respect prefers-reduced-motion
- * through the shared `t-swap` and `t-shimmer` utilities.
+ * A status line that narrates the marking: the current state breathes while it holds, and each
+ * new state settles in from below. Pass one state to hold it; pass several to cycle every
+ * `holdMs`. Both animations respect prefers-reduced-motion through `t-swap` and `t-pending`.
  */
 export function ThinkingStatus({
   states,
@@ -32,7 +31,7 @@ export function ThinkingStatus({
   return (
     <span role="status" aria-live="polite" className={cn("inline-block", className)}>
       <span key={text} className="t-swap inline-block">
-        <span className="t-shimmer">{text}</span>
+        <span className="t-pending">{text}</span>
       </span>
     </span>
   );

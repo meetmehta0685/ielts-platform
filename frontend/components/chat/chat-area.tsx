@@ -38,7 +38,7 @@ const STARTERS = [
 
 const THINKING = ["Thinking", "Checking the band descriptors", "Drafting an answer"];
 
-/* ---------- Streaming words: each new word resolves through a soft blur (recipe 30) ---------- */
+/* ---------- Streaming words: each new word fades in ---------- */
 
 const STREAM_WORD_CLASS = "animate-[t-stream-in_var(--duration-slow)_var(--ease-in-out)_both] motion-reduce:animate-none";
 
@@ -233,7 +233,7 @@ export function ChatArea({
               <button
                 type="button"
                 onClick={() => speakMessage(message.content)}
-                className="-ml-2 mt-2 inline-flex h-8 items-center gap-1.5 rounded-full px-2 text-[13px] text-soft transition-colors duration-[var(--duration-quick)] hover:bg-panel hover:text-ink"
+                className="-ml-2 mt-2 inline-flex h-8 items-center gap-1.5 rounded-[8px] px-2 text-[13px] text-soft transition-colors duration-[var(--duration-quick)] hover:bg-panel hover:text-ink"
               >
                 <Volume2 className="size-3.5" />
                 Listen

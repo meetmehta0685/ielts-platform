@@ -35,9 +35,9 @@ const MODULES = [
 
 export function Sitting() {
   return (
-    <section id="how-it-works" className="lp-wrap scroll-mt-28 py-20 lg:py-28" aria-labelledby="sitting-title">
+    <section id="how-it-works" className="lp-wrap scroll-mt-24 py-20 lg:py-28" aria-labelledby="sitting-title">
       <Reveal>
-        <div className="t-stagger-line flex flex-col justify-between gap-4 md:flex-row md:items-end" style={{ "--i": 0 } as CSSProperties}>
+        <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
           <h2 id="sitting-title" className="max-w-[16ch] font-display text-[36px] text-balance sm:text-[52px]">
             A full sitting, in exam order.
           </h2>
@@ -57,8 +57,8 @@ export function Sitting() {
         </div>
 
         <ol className="mt-8 grid gap-x-6 gap-y-8 sm:grid-cols-2 lg:grid-cols-4">
-          {MODULES.map((m, i) => (
-            <li key={m.name} className="t-stagger-line" style={{ "--i": i + 1 } as CSSProperties}>
+          {MODULES.map((m) => (
+            <li key={m.name}>
               <p className="flex items-baseline justify-between border-t border-border pt-4">
                 <span className="flex items-center gap-2 text-[17px] font-semibold">
                   <span aria-hidden className="size-2.5 rounded-full" style={{ background: `var(${m.hue})` }} />

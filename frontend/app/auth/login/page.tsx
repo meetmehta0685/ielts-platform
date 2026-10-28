@@ -17,7 +17,7 @@ function FormSkeleton() {
           <div className="t-skel h-10 w-full rounded-[10px]" />
         </div>
       ))}
-      <div className="t-skel mt-1 h-10 w-full rounded-full" />
+      <div className="t-skel mt-1 h-10 w-full rounded-[10px]" />
     </div>
   );
 }

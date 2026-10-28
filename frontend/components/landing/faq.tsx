@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, type CSSProperties, type ReactNode } from "react";
-import { Reveal } from "@/components/motion/reveal";
+import { useState, type ReactNode } from "react";
 
 const QUESTIONS: { q: string; a: ReactNode }[] = [
   {
@@ -73,20 +72,16 @@ const QUESTIONS: { q: string; a: ReactNode }[] = [
 export function Faq() {
   const [open, setOpen] = useState(0);
   return (
-    <section id="questions" className="lp-wrap scroll-mt-28 py-20 lg:py-28" aria-labelledby="faq-title">
-      <Reveal className="grid gap-10 lg:grid-cols-12 lg:gap-6">
-        <h2
-          id="faq-title"
-          className="t-stagger-line max-w-[12ch] font-display text-[36px] text-balance sm:text-[52px] lg:col-span-5"
-          style={{ "--i": 0 } as CSSProperties}
-        >
+    <section id="questions" className="lp-wrap scroll-mt-24 py-20 lg:py-28" aria-labelledby="faq-title">
+      <div className="grid gap-10 lg:grid-cols-12 lg:gap-6">
+        <h2 id="faq-title" className="max-w-[12ch] font-display text-[36px] text-balance sm:text-[52px] lg:col-span-5">
           Questions before you start.
         </h2>
-        <div className="t-stagger-line flex flex-col gap-2 lg:col-span-7" style={{ "--i": 1 } as CSSProperties}>
+        <div className="flex flex-col border-b border-border lg:col-span-7">
           {QUESTIONS.map((item, i) => {
             const isOpen = open === i;
             return (
-              <div key={item.q} className="lp-acc rounded-2xl bg-panel" data-open={isOpen}>
+              <div key={item.q} className="lp-acc border-t border-border" data-open={isOpen}>
                 <h3>
                   <button
                     type="button"
@@ -94,17 +89,17 @@ export function Faq() {
                     aria-expanded={isOpen}
                     aria-controls={`faq-a-${i}`}
                     onClick={() => setOpen(isOpen ? -1 : i)}
-                    className="flex min-h-14 w-full items-center justify-between gap-4 rounded-2xl px-5 py-3 text-left text-[17px] font-medium transition-colors duration-[var(--duration-quick)] hover:bg-panel-strong"
+                    className="group flex min-h-16 w-full items-center justify-between gap-4 py-4 text-left text-[17px] font-medium"
                   >
                     {item.q}
-                    <svg className="lp-acc-chevron size-4 shrink-0 text-soft" viewBox="0 0 16 16" fill="none" aria-hidden>
+                    <svg className="lp-acc-chevron size-4 shrink-0 text-soft transition-colors group-hover:text-ink" viewBox="0 0 16 16" fill="none" aria-hidden>
                       <path d="M4 6.5L8 10.5L12 6.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                   </button>
                 </h3>
                 <div id={`faq-a-${i}`} role="region" aria-labelledby={`faq-q-${i}`} className="lp-acc-panel">
                   <div className="lp-acc-inner">
-                    <div className="flex max-w-[60ch] flex-col gap-3 px-5 pb-5 text-[15px] leading-relaxed text-soft">
+                    <div className="flex max-w-[60ch] flex-col gap-3 pb-6 text-[15px] leading-relaxed text-soft">
                       {item.a}
                     </div>
                   </div>
@@ -113,7 +108,7 @@ export function Faq() {
             );
           })}
         </div>
-      </Reveal>
+      </div>
     </section>
   );
 }

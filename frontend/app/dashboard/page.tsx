@@ -1,11 +1,9 @@
 import Link from "next/link";
-import type { CSSProperties } from "react";
 import { redirect } from "next/navigation";
 import { requireServerUser } from "@/lib/supabase-server";
 import { loadTrackRecord, type TrackRecordEntry } from "@/lib/track-record";
 import { AppShell, PageColumn, Panel } from "@/components/app/app-shell";
 import { MODULE_HUE } from "@/lib/module-hue";
-import { Reveal } from "@/components/motion/reveal";
 import { Button } from "@/components/ui/button";
 import { BandTrend, type BandPoint } from "@/components/dashboard/band-trend";
 import { PlanTick } from "@/components/dashboard/plan-tick";
@@ -33,7 +31,6 @@ type ModuleName = (typeof MODULES)[number]["name"];
 const shortDate = (iso: string) =>
   new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 
-const stagger = (i: number) => ({ "--i": i }) as CSSProperties;
 
 export default async function DashboardPage() {
   const { supabase, user, accessToken } = await requireServerUser("/dashboard");
@@ -146,49 +143,49 @@ export default async function DashboardPage() {
           </>
         }
       >
-        <Reveal className="grid grid-cols-2 gap-4 lg:grid-cols-12">
-          {/* Four module tiles, 3 columns each */}
-          {perModule.map((m, i) => (
-            <Link
-              key={m.key}
-              href={`/${m.key}`}
-              style={stagger(i)}
-              className="t-stagger-line tile tile-hover group col-span-1 flex min-h-[136px] flex-col justify-between p-5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand lg:col-span-3"
-            >
-              <span className="flex items-center justify-between text-[15px] font-medium text-ink">
-                <span className="flex items-center gap-2">
-                  <span aria-hidden className={`size-2 rounded-full ${MODULE_HUE[m.name]}`} />
-                  {m.name}
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-12">
+          {/* Your bands: one strip, a column per module */}
+          <section aria-label="Average band per module" className="tile col-span-2 grid grid-cols-2 overflow-hidden lg:col-span-12 lg:grid-cols-4">
+            {perModule.map((m, i) => (
+              <Link
+                key={m.key}
+                href={`/${m.key}`}
+                className={`group flex flex-col gap-6 p-5 transition-colors duration-[var(--duration-quick)] hover:bg-panel focus-visible:-outline-offset-2 sm:p-6 ${
+                  i % 2 === 1 ? "border-l border-border" : ""
+                } ${i >= 2 ? "border-t border-border lg:border-t-0" : ""} ${i === 2 ? "lg:border-l" : ""}`}
+              >
+                <span className="flex items-center justify-between gap-2 text-[15px] font-medium text-ink">
+                  <span className="flex items-center gap-2">
+                    <span aria-hidden className={`size-2 rounded-full ${MODULE_HUE[m.name]}`} />
+                    {m.name}
+                  </span>
+                  <span className="hidden text-sm font-normal text-soft underline-offset-4 group-hover:text-ink group-hover:underline sm:inline">
+                    Practise
+                  </span>
                 </span>
-                <span
-                  aria-hidden
-                  className="translate-x-[-4px] text-sm text-soft opacity-0 transition-[opacity,transform] duration-[var(--duration-fast)] ease-[var(--ease-smooth-out)] group-hover:translate-x-0 group-hover:opacity-100"
-                >
-                  Practise →
+                <span>
+                  {m.avg != null ? (
+                    <span className="tabular block font-display text-[36px] tracking-[-0.02em] text-ink">{m.avg.toFixed(1)}</span>
+                  ) : (
+                    <span className="block text-[17px] leading-[36px] text-soft">Not tried yet</span>
+                  )}
+                  <span className="mt-1 block text-sm text-soft">
+                    {m.count === 0 ? `Target ${target.toFixed(1)}` : `${m.count} ${m.unit[m.count === 1 ? 0 : 1]} marked`}
+                  </span>
                 </span>
-              </span>
-              <span>
-                <span className="tabular block font-display text-[36px] text-ink">
-                  {m.avg != null ? m.avg.toFixed(1) : "—"}
-                </span>
-                <span className="mt-2 block text-sm text-soft">
-                  {m.count === 0
-                    ? "No attempts yet"
-                    : `${m.count} ${m.unit[m.count === 1 ? 0 : 1]} marked`}
-                </span>
-              </span>
-            </Link>
-          ))}
+              </Link>
+            ))}
+          </section>
 
           {/* 9: the main chart */}
           <Panel
             title="Band per marked attempt"
             aside={points.length > 0 ? `Latest ${points.length} of ${graded.length}` : undefined}
-            className="t-stagger-line col-span-2 lg:col-span-9"
+            className="col-span-2 lg:col-span-9"
           >
-            <div style={stagger(4)} className="rounded-xl bg-sheet p-4 pb-2">
+            <div>
               {points.length === 0 ? (
-                <div className="flex h-[248px] flex-col items-start justify-center gap-3 px-2">
+                <div className="flex min-h-[140px] flex-col items-start justify-center gap-3 lg:h-[248px]">
                   <p className="max-w-[46ch] text-[15px] text-soft">
                     Each marked essay, recording and test lands here as a point, against your target of Band{" "}
                     {target.toFixed(1)}. Nothing is marked yet.
@@ -207,7 +204,7 @@ export default async function DashboardPage() {
           <Panel
             title="This week's plan"
             aside={hasPlan && plan ? `Week ${plan.weekly_plans[currentWeekIndex(plan)].week} of ${plan.weekly_plans.length}` : undefined}
-            className="t-stagger-line col-span-2 flex flex-col lg:col-span-3"
+            className="col-span-2 flex flex-col lg:col-span-3"
           >
             {planFailed ? (
               <p className="text-[15px] text-soft">Your plan didn&apos;t load. Refresh to try again.</p>
@@ -262,7 +259,7 @@ export default async function DashboardPage() {
                 </Link>
               ) : undefined
             }
-            className="t-stagger-line col-span-2 lg:col-span-6"
+            className="col-span-2 lg:col-span-6"
           >
             {trackRecord.length === 0 ? (
               <p className="text-[15px] text-soft">
@@ -281,7 +278,7 @@ export default async function DashboardPage() {
           <Panel
             title={`Distance to Band ${target.toFixed(1)}`}
             aside={<span className="hidden sm:inline">{weakAreas.length ? `Focus: ${weakAreas.join(", ")}` : "Lowest first"}</span>}
-            className="t-stagger-line col-span-2 flex flex-col lg:col-span-6"
+            className="col-span-2 flex flex-col lg:col-span-6"
           >
             <ul className="flex flex-col">
               {gapRows.map((m) => {
@@ -334,7 +331,7 @@ export default async function DashboardPage() {
               })()}
             </div>
           </Panel>
-        </Reveal>
+        </div>
       </PageColumn>
     </AppShell>
   );

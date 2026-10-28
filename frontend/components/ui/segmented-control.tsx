@@ -4,7 +4,7 @@ import { useCallback, useLayoutEffect, useRef, type KeyboardEvent, type ReactNod
 import { cn } from "@/lib/utils";
 
 /**
- * Segmented control with a sliding pill (transitions recipe 16). The active option's offsetLeft and
+ * Segmented control with a sliding pill. The active option's offsetLeft and
  * offsetWidth are written onto the pill; CSS owns the tween. First paint and resizes snap without
  * animating. The pill transition is dropped under prefers-reduced-motion. Arrow keys move the choice.
  */

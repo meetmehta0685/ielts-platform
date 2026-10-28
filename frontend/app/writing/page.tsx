@@ -464,7 +464,7 @@ function WritingPageContent() {
                 <span className="tabular text-sm text-soft">{paper.minutes} minutes</span>
               </div>
               <p className="text-[15px] leading-relaxed text-soft">{paper.intro}</p>
-              <div key={prompt} className="t-swap my-5 border-l-2 border-ink py-1 pl-4">
+              <div key={prompt} className="t-swap my-5 border-y border-line-strong py-4">
                 {prompt ? (
                   <p className="text-[17px] leading-relaxed text-ink">{prompt}</p>
                 ) : (

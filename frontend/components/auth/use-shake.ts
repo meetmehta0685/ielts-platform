@@ -3,7 +3,7 @@
 import { useCallback } from "react";
 
 /**
- * Replays the error-state shake (recipe 12) on the given `.t-input` elements. Removing the class
+ * Replays the error-state shake on the given `.t-input` elements. Removing the class
  * and forcing a reflow first lets a second failed submit shake again.
  */
 export function useShake() {

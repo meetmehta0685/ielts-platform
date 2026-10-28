@@ -5,28 +5,21 @@ import { ProductMark } from "@/components/app/app-shell";
 export function Cta({ signedIn }: { signedIn: boolean }) {
   return (
     <section className="lp-wrap pb-6" aria-labelledby="cta-title">
-      <div className="relative overflow-hidden rounded-[32px] bg-brand px-6 py-16 text-center text-white sm:px-12 sm:py-24">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-x-0 bottom-0 flex h-2"
-        >
-          <span className="flex-[30] bg-listening" />
-          <span className="flex-[60] bg-reading" />
-          <span className="flex-[60] bg-writing" />
-          <span className="flex-[14] bg-speaking" />
+      <div className="grid gap-8 rounded-2xl bg-brand px-6 py-12 text-white sm:px-10 sm:py-16 lg:grid-cols-12 lg:items-end lg:gap-6">
+        <div className="lg:col-span-7">
+          <h2 id="cta-title" className="max-w-[14ch] font-display text-[40px] text-balance sm:text-[60px]">
+            Sit your first test today.
+          </h2>
+          <p className="mt-5 max-w-[40ch] text-[17px] text-white/85">
+            Practise one module or sit the full mock. Both start from a free account, and every result is saved to your
+            records.
+          </p>
         </div>
-        <h2 id="cta-title" className="mx-auto max-w-[14ch] font-display text-[40px] text-balance sm:text-[64px]">
-          Sit your first test today.
-        </h2>
-        <p className="mx-auto mt-5 max-w-[38ch] text-[17px] text-white/80">
-          Practise one module or sit the full mock. Both start from a free account, and every result is saved to your
-          records.
-        </p>
-        <div className="mt-9 flex flex-wrap justify-center gap-2.5">
-          <Button asChild size="lg" className="bg-white text-ink shadow-none hover:bg-white/90">
+        <div className="flex flex-wrap gap-2.5 lg:col-span-5 lg:justify-end">
+          <Button asChild size="lg" className="bg-white text-ink hover:bg-white/90">
             <Link href={signedIn ? "/dashboard" : "/auth/signup"}>{signedIn ? "Go to your dashboard" : "Create a free account"}</Link>
           </Button>
-          <Button asChild size="lg" className="bg-white/12 text-white shadow-none hover:bg-white/20">
+          <Button asChild size="lg" className="bg-transparent text-white shadow-[inset_0_0_0_1px_rgb(255_255_255/0.45)] hover:bg-white/10">
             <Link href="/simulator">Sit the full mock</Link>
           </Button>
         </div>
@@ -47,6 +40,9 @@ export function Footer({ signedIn }: { signedIn: boolean }) {
         &amp; Assessment. Bands shown here are estimates.
       </p>
       <nav aria-label="Footer" className="flex gap-4">
+        <Link href="/privacy" className="hover:text-ink">
+          Privacy
+        </Link>
         <a href="#top" className="hover:text-ink">
           Back to top
         </a>

@@ -8,7 +8,7 @@ import type { ReactNode } from "react";
 export function ExamLoading({ shellTitle, label }: { shellTitle: string; label: string }) {
   return (
     <AppShell title={shellTitle}>
-      <PageColumn title={<span className="t-shimmer">{label}</span>}>
+      <PageColumn title={<span className="t-pending">{label}</span>}>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-12" aria-hidden>
           <div className="t-skel h-[260px] rounded-2xl lg:col-span-8" />
           <div className="t-skel h-[260px] rounded-2xl lg:col-span-4" />

@@ -7,7 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-import { OAUTH_NEXT_PATH_KEY, safeInternalPath } from "@/lib/auth-redirect";
+import { safeInternalPath, startGoogleSignIn } from "@/lib/auth-redirect";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -80,18 +80,8 @@ export function LoginForm() {
   const handleGoogleLogin = async () => {
     setIsLoading(true);
     try {
-      const callbackUrl = new URL("/auth/callback", window.location.origin);
-      window.sessionStorage.setItem(OAUTH_NEXT_PATH_KEY, redirectPath);
-
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: {
-          redirectTo: callbackUrl.toString(),
-        },
-      });
-      if (error) throw error;
+      await startGoogleSignIn(redirectPath);
     } catch (error: unknown) {
-      window.sessionStorage.removeItem(OAUTH_NEXT_PATH_KEY);
       toast.error(error instanceof Error ? error.message : "Google sign-in didn't start. Try again.");
       setIsLoading(false);
     }

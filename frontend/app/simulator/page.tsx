@@ -117,7 +117,7 @@ function TestLoadingState({ error }: { error: string | null }) {
     </div>
   ) : (
     <div className="flex flex-col gap-3" aria-label="Loading the paper">
-      <p className="t-shimmer text-[15px]">Loading the paper</p>
+      <p className="t-pending text-[15px]">Loading the paper</p>
       <span className="t-skel block h-5 w-10/12" />
       <span className="t-skel block h-5 w-9/12" />
       <span className="t-skel block h-5 w-7/12" />
@@ -129,7 +129,7 @@ function TestLoadingState({ error }: { error: string | null }) {
 function MarkingOverlay({ label }: { label: string }) {
   return (
     <div className="t-rise absolute inset-0 z-10 flex items-center justify-center bg-[rgba(255,255,255,0.86)]">
-      <p className="t-shimmer text-[17px] font-medium">{label}</p>
+      <p className="t-pending text-[17px] font-medium">{label}</p>
     </div>
   );
 }
@@ -552,7 +552,7 @@ export default function SimulatorPage() {
   if (isAuthLoading) {
     return (
       <AppShell title="Full mock test">
-        <PageColumn title={<span className="t-shimmer">Preparing your mock test</span>}>
+        <PageColumn title={<span className="t-pending">Preparing your mock test</span>}>
           <div className="t-skel h-[300px] rounded-2xl" aria-hidden />
         </PageColumn>
       </AppShell>

@@ -90,7 +90,7 @@ export default function AuthCallbackPage() {
     <AuthFrame title="Signing you in">
       <p role="status" aria-live="polite" className="text-[15px]">
         <span key={status} className="t-swap inline-block">
-          <span className="t-shimmer">{status}</span>
+          <span className="t-pending">{status}</span>
         </span>
       </p>
     </AuthFrame>

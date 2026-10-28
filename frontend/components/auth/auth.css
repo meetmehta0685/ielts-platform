@@ -1,4 +1,4 @@
-/* Error state shake (transitions.dev recipe 12), scoped to the auth forms. */
+/* Error state shake, scoped to the auth forms. */
 :root {
   --shake-distance: 6px;
   --shake-overshoot: 4px;

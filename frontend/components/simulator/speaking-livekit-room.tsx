@@ -72,7 +72,7 @@ function StatusLine({ state, aside }: { state: RoomState; aside?: ReactNode }) {
     <div className="flex flex-wrap items-center justify-between gap-3">
       <p key={state} className="t-swap inline-flex items-center gap-2 text-[15px] text-ink" aria-live="polite">
         <span className={cn("size-2 rounded-full", s.dot)} aria-hidden />
-        <span className={state === "preparing" || state === "connecting" ? "t-shimmer" : undefined}>{s.text}</span>
+        <span className={state === "preparing" || state === "connecting" ? "t-pending" : undefined}>{s.text}</span>
       </p>
       {aside}
     </div>
@@ -427,7 +427,7 @@ function LiveSpeakingStage({
         aside={
           <StartAudio
             label="Turn on examiner audio"
-            className="inline-flex h-10 items-center rounded-full bg-ink px-5 text-[15px] font-medium text-white transition-colors duration-[var(--duration-quick)] hover:bg-ink-hover"
+            className="inline-flex h-10 items-center rounded-[10px] bg-ink px-5 text-[15px] font-medium text-white transition-colors duration-[var(--duration-quick)] hover:bg-ink-hover"
           />
         }
       />
@@ -480,7 +480,7 @@ function LiveSpeakingStage({
               source={Track.Source.Microphone}
               showIcon={false}
               className={cn(
-                "inline-flex h-12 w-full items-center justify-center gap-2 rounded-full text-[15px] font-medium transition-[background-color,color,transform] duration-[var(--duration-quick)] active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand",
+                "inline-flex h-12 w-full items-center justify-center gap-2 rounded-[12px] text-[15px] font-medium transition-[background-color,color,transform] duration-[var(--duration-quick)] active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand",
                 isMicrophoneEnabled ? "bg-ink text-white hover:bg-ink-hover" : "bg-bad-tint text-bad hover:bg-bad-tint-hover"
               )}
             >
@@ -501,7 +501,7 @@ function LiveSpeakingStage({
             <TrackToggle
               source={Track.Source.Camera}
               showIcon={false}
-              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-panel-strong text-[15px] font-medium text-ink transition-[background-color,transform] duration-[var(--duration-quick)] hover:bg-panel-hover active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-[10px] bg-panel-strong text-[15px] font-medium text-ink transition-[background-color,transform] duration-[var(--duration-quick)] hover:bg-panel-hover active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
             >
               {isCameraEnabled ? <Video className="size-4" /> : <VideoOff className="size-4" />}
               {isCameraEnabled ? "Camera on" : "Camera off"}

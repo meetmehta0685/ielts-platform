@@ -41,7 +41,7 @@ export function ProductMark({ className }: { className?: string }) {
     <span
       aria-hidden
       className={cn(
-        "inline-flex size-7 items-center justify-center rounded-[9px] bg-brand font-display text-[16px] leading-none text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.25),0_2px_6px_-2px_rgb(52_82_255/0.6)]",
+        "inline-flex size-7 items-center justify-center rounded-[7px] bg-brand font-display text-[16px] leading-none text-white",
         className
       )}
     >
@@ -197,7 +197,7 @@ export function AppShell({ title, children }: { title: string; children: ReactNo
           </div>
         </div>
 
-        <main className="min-w-0 flex-1 bg-sheet lg:rounded-[20px] lg:shadow-tile">{children}</main>
+        <main className="min-w-0 flex-1 bg-sheet lg:rounded-[14px] lg:shadow-tile">{children}</main>
       </div>
     </div>
   );
@@ -247,7 +247,7 @@ export function Panel({
   className?: string;
 }) {
   return (
-    <section className={cn("rounded-[20px] bg-panel p-5 sm:p-6", className)}>
+    <section className={cn("rounded-2xl bg-panel p-5 sm:p-6", className)}>
       {(title || aside) && (
         <div className="mb-4 flex items-baseline justify-between gap-4">
           {title && <h2 className="text-[15px] font-semibold text-ink">{title}</h2>}

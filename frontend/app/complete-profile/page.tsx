@@ -124,7 +124,7 @@ export default function CompleteProfilePage() {
       <header className="flex h-16 items-center justify-between border-b border-border px-4 sm:px-8">
         <Link
           href={hasProfile ? "/dashboard" : "/"}
-          className="-mx-2 flex items-center gap-2.5 rounded-full px-2 py-1.5 transition-colors duration-[var(--duration-quick)] hover:bg-panel focus-visible:outline-2 focus-visible:outline-brand"
+          className="-mx-2 flex items-center gap-2.5 rounded-[8px] px-2 py-1.5 transition-colors duration-[var(--duration-quick)] hover:bg-panel focus-visible:outline-2 focus-visible:outline-brand"
         >
           <ProductMark />
           <span className="text-[15px] font-medium text-ink">IELTS Prep</span>

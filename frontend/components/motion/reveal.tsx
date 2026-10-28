@@ -4,9 +4,8 @@ import { useEffect, useRef, type ElementType, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * Staggered entrance for a block's parts. Children marked with `t-stagger-line` (and an optional
- * `--i` index in their style) rise in once the block scrolls into view. Content stays visible
- * if this never runs: the hidden state only applies after mount.
+ * Marks a block `is-shown` once it scrolls into view, for data that draws itself in (the sitting
+ * bar). Text is never hidden: content stays visible whether or not this runs.
  */
 export function Reveal({
   as: Tag = "div",

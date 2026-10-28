@@ -23,7 +23,7 @@ export function AuthFrame({
       <header className="flex h-16 items-center px-4 sm:px-8">
         <Link
           href="/"
-          className="-mx-2 flex items-center gap-2.5 rounded-full px-2 py-1.5 transition-colors duration-[var(--duration-quick)] hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+          className="-mx-2 flex items-center gap-2.5 rounded-[8px] px-2 py-1.5 transition-colors duration-[var(--duration-quick)] hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
         >
           <ProductMark />
           <span className="text-[15px] font-medium text-ink">IELTS Prep</span>
@@ -32,7 +32,7 @@ export function AuthFrame({
 
       <main className="flex flex-1 items-start justify-center px-4 pt-6 pb-16 sm:items-center sm:pt-0 sm:pb-24">
         <div className="w-full max-w-[420px]">
-          <div className="rounded-[24px] bg-sheet p-6 shadow-lift sm:p-8">
+          <div className="rounded-2xl bg-sheet p-6 shadow-tile sm:p-8">
             <h1 className="font-display text-[30px] text-ink sm:text-[36px]">{title}</h1>
             {lead && <p className="mt-3 text-[15px] leading-normal text-soft">{lead}</p>}
             <div className="mt-7">{children}</div>

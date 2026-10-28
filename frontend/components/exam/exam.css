@@ -1,18 +1,17 @@
-/* Exam-mode motion, adapted from .taste-skill/transitions recipes onto the app's motion tokens. */
+/* Exam-mode motion on the app's motion tokens. */
 
-/* 08 Page side-by-side: each exam paper enters from the right as the previous one leaves. */
+/* Each exam paper enters from the right as the previous one leaves. */
 @keyframes x-stage-in {
   from {
     opacity: 0;
     transform: translateX(var(--distance-base));
-    filter: blur(var(--blur-medium));
   }
 }
 .x-stage {
   animation: x-stage-in var(--duration-fast) var(--ease-smooth-out) both;
 }
 
-/* 10 Success check: the mark that confirms the answers were submitted and marked. */
+/* Success check: the tick draws itself once the answers are submitted and marked. */
 .x-check {
   display: inline-block;
   opacity: 0;
@@ -26,10 +25,7 @@
   stroke-dashoffset: 20;
 }
 .x-check[data-state="in"] {
-  animation:
-    x-check-fade var(--duration-very-slow) var(--ease-smooth-out) forwards,
-    x-check-rotate var(--duration-very-slow) var(--ease-smooth-out) forwards,
-    x-check-bob var(--duration-very-slow) var(--ease-bounce) forwards;
+  animation: x-check-fade var(--duration-fast) var(--ease-smooth-out) forwards;
 }
 .x-check[data-state="in"] svg path {
   animation: x-check-draw var(--duration-very-slow) var(--ease-smooth-out) var(--duration-micro) forwards;
@@ -39,34 +35,17 @@
     opacity: 1;
   }
 }
-@keyframes x-check-rotate {
-  from {
-    transform: rotate(80deg);
-  }
-  to {
-    transform: rotate(0deg);
-  }
-}
-@keyframes x-check-bob {
-  from {
-    translate: 0 12px;
-  }
-  to {
-    translate: 0 0;
-  }
-}
 @keyframes x-check-draw {
   to {
     stroke-dashoffset: 0;
   }
 }
 
-/* 02 Number pop-in: the band figure arrives digit by digit, the decimals staggered. */
+/* The band figure settles in digit by digit, the decimals a beat behind. */
 @keyframes x-digit-in {
   from {
     opacity: 0;
-    transform: translateY(var(--distance-base));
-    filter: blur(var(--blur-small));
+    transform: translateY(var(--distance-micro));
   }
 }
 .x-digits {
@@ -75,11 +54,11 @@
 }
 .x-digit {
   display: inline-block;
-  animation: x-digit-in var(--duration-very-slow) var(--ease-bounce) both;
-  animation-delay: calc(var(--d, 0) * 70ms);
+  animation: x-digit-in var(--duration-medium) var(--ease-smooth-out) both;
+  animation-delay: calc(var(--d, 0) * 50ms);
 }
 
-/* 06 Modal: the exit and submit confirmations scale up from 0.97 as the scrim fades in. */
+/* Modal: the exit and submit confirmations scale up from 0.97 as the scrim fades in. */
 @keyframes x-fade-in {
   from {
     opacity: 0;

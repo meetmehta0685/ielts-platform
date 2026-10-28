@@ -1,4 +1,4 @@
-/* Checkbox check (transitions.dev recipe 25): the box fills, then the tick draws itself. */
+/* Checkbox check: the box fills, then the tick draws itself. */
 .t-check {
   transition:
     background-color var(--duration-quick) var(--ease-smooth-out),

@@ -1,7 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { Reveal } from "@/components/motion/reveal";
+import { useMemo, useRef, useState } from "react";
 import { MODULE_HUE } from "@/lib/module-hue";
 import { MODULES, formatBand, formatMean, overallBand, parseBands } from "./band";
 
@@ -14,28 +13,11 @@ const EXAMPLES = [
 
 export function BandCalculator() {
   const [value, setValue] = useState(START);
-  const [focused, setFocused] = useState(false);
-  const [caretX, setCaretX] = useState<number | null>(null);
   const [changes, setChanges] = useState(0);
   const input = useRef<HTMLInputElement>(null);
-  const mirror = useRef<HTMLSpanElement>(null);
 
   const parsed = useMemo(() => parseBands(value), [value]);
   const result = parsed.ok ? overallBand(parsed.bands) : null;
-
-  // Place the block caret after the last character while the field is not being edited.
-  useLayoutEffect(() => {
-    const m = mirror.current;
-    const i = input.current;
-    if (!m || !i) return;
-    const measure = () => {
-      const w = m.getBoundingClientRect().width;
-      setCaretX(w + 46 < i.clientWidth ? w + 6 : null);
-    };
-    measure();
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
-  }, [value]);
 
   const fill = (next: string) => {
     setValue(next);
@@ -44,9 +26,9 @@ export function BandCalculator() {
   };
 
   return (
-    <section id="your-bands" className="lp-wrap scroll-mt-28 py-20 lg:py-28" aria-labelledby="bands-title">
-      <Reveal className="grid items-start gap-10 lg:grid-cols-12 lg:gap-6">
-        <div className="t-stagger-line lg:col-span-5" style={{ "--i": 0 } as CSSProperties}>
+    <section id="your-bands" className="lp-wrap scroll-mt-24 py-20 lg:py-28" aria-labelledby="bands-title">
+      <div className="grid items-start gap-10 lg:grid-cols-12 lg:gap-6">
+        <div className="lg:col-span-5">
           <h2 id="bands-title" className="max-w-[14ch] font-display text-[36px] text-balance sm:text-[52px]">
             Work out an Overall band.
           </h2>
@@ -60,7 +42,7 @@ export function BandCalculator() {
               <button
                 key={ex.value}
                 type="button"
-                className="tabular h-9 rounded-full bg-panel-strong px-3.5 text-[14px] transition-[background-color,transform] duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] hover:bg-panel-hover active:scale-[0.97]"
+                className="tabular h-9 rounded-[8px] bg-panel-strong px-3 text-[14px] transition-[background-color,transform] duration-[var(--duration-quick)] ease-[var(--ease-smooth-out)] hover:bg-panel-hover active:scale-[0.97]"
                 onClick={() => fill(ex.value)}
                 aria-label={`Fill in ${ex.value}, which ${ex.note}`}
               >
@@ -70,8 +52,8 @@ export function BandCalculator() {
           </div>
         </div>
 
-        <div className="t-stagger-line tile p-5 sm:p-7 lg:col-span-7" style={{ "--i": 1 } as CSSProperties}>
-          <div className="relative">
+        <div className="tile p-5 sm:p-7 lg:col-span-7">
+          <div>
             <input
               ref={input}
               id="bands-input"
@@ -84,30 +66,14 @@ export function BandCalculator() {
                 setValue(e.target.value);
                 setChanges((c) => c + 1);
               }}
-              onFocus={() => setFocused(true)}
-              onBlur={() => setFocused(false)}
               aria-describedby="bands-result"
-              className="tabular h-16 w-full rounded-2xl bg-panel px-5 font-display text-[28px] caret-brand outline-none ring-brand transition-shadow duration-[var(--duration-quick)] focus:ring-2 sm:text-[34px]"
+              className="tabular h-16 w-full rounded-[12px] bg-panel px-5 font-display text-[28px] tracking-[-0.02em] caret-brand shadow-[inset_0_0_0_1px_var(--border)] outline-none transition-shadow duration-[var(--duration-quick)] hover:shadow-[inset_0_0_0_1px_var(--input)] focus:shadow-[inset_0_0_0_2px_var(--brand)] sm:text-[34px]"
             />
-            <span
-              ref={mirror}
-              className="tabular pointer-events-none invisible absolute top-0 left-5 font-display text-[28px] whitespace-pre sm:text-[34px]"
-              aria-hidden="true"
-            >
-              {value}
-            </span>
-            {!focused && caretX !== null && (
-              <span
-                className="lp-caret pointer-events-none absolute top-1/2 h-8 w-[3px] -translate-y-1/2 rounded-full bg-brand"
-                style={{ left: caretX + 20 }}
-                aria-hidden="true"
-              />
-            )}
           </div>
 
           <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-5" role="group" aria-label="Module bands and Overall band">
             {MODULES.map((name, i) => (
-              <div key={name} className="rounded-2xl bg-panel p-3.5">
+              <div key={name} className="rounded-[12px] bg-panel p-3.5">
                 <div className="flex items-center gap-1.5 text-[13px] text-soft">
                   <span aria-hidden className={`size-1.5 rounded-full ${MODULE_HUE[name]}`} />
                   {name}
@@ -119,7 +85,7 @@ export function BandCalculator() {
                 </div>
               </div>
             ))}
-            <div className="col-span-2 rounded-2xl bg-brand p-3.5 text-white sm:col-span-1">
+            <div className="col-span-2 rounded-[12px] bg-brand p-3.5 text-white sm:col-span-1">
               <div className="text-[13px] text-white/80">Overall band</div>
               <div className="tabular mt-2 font-display text-[28px]">
                 <span key={`o-${result?.overall ?? "x"}`} className={result ? "t-pop" : undefined}>
@@ -143,7 +109,7 @@ export function BandCalculator() {
             )}
           </p>
         </div>
-      </Reveal>
+      </div>
     </section>
   );
 }

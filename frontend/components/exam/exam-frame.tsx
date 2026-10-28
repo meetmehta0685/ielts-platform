@@ -45,7 +45,7 @@ export const passageSize: Record<TextScale, string> = {
 };
 
 /* ------------------------------------------------------------------------------------------------
- * Confirm dialog (transitions recipe 06).
+ * Confirm dialog.
  * --------------------------------------------------------------------------------------------- */
 export function ConfirmDialog({
   open,
@@ -107,7 +107,7 @@ export function ConfirmDialog({
 }
 
 /* ------------------------------------------------------------------------------------------------
- * Success check (transitions recipe 10).
+ * Success check.
  * --------------------------------------------------------------------------------------------- */
 export function SuccessCheck({ className }: { className?: string }) {
   const [state, setState] = useState<"out" | "in">("out");
@@ -126,7 +126,7 @@ export function SuccessCheck({ className }: { className?: string }) {
 }
 
 /* ------------------------------------------------------------------------------------------------
- * Band digits (transitions recipe 02): the band figure pops in, the decimal and tenth staggered.
+ * Band digits: the band figure settles in, the decimal and tenth a beat behind.
  * --------------------------------------------------------------------------------------------- */
 export function BandDigits({ value, className }: { value: string; className?: string }) {
   const chars = value.split("");
@@ -225,7 +225,7 @@ export function ExamFrame({
             <button
               type="button"
               onClick={onToggleTimer}
-              className="ml-1 hidden h-8 rounded-full px-2.5 text-[13px] text-soft transition-colors duration-[var(--duration-quick)] hover:bg-panel-hover hover:text-ink md:inline-flex md:items-center"
+              className="ml-1 hidden h-8 rounded-[8px] px-2.5 text-[13px] text-soft transition-colors duration-[var(--duration-quick)] hover:bg-panel-hover hover:text-ink md:inline-flex md:items-center"
             >
               {timerHidden ? "Show time" : "Hide time"}
             </button>
@@ -252,7 +252,7 @@ export function ExamFrame({
           <button
             type="button"
             onClick={() => setConfirmExit(true)}
-            className="inline-flex h-10 items-center rounded-full px-3 text-[14px] text-ink transition-colors duration-[var(--duration-quick)] hover:bg-panel-hover"
+            className="inline-flex h-10 items-center rounded-[10px] px-3 text-[14px] text-ink transition-colors duration-[var(--duration-quick)] hover:bg-panel-hover"
           >
             Exit
           </button>

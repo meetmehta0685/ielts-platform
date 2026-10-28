@@ -721,7 +721,7 @@ function SpeakingPageContent() {
             <div className="order-2 flex flex-wrap items-center gap-3 px-1 lg:order-none">
               <Button onClick={speakQuestion} variant="secondary" size="sm" disabled={isSpeakingPrompt}>
                 <Volume2 />
-                {isSpeakingPrompt ? <span className="t-shimmer">Examiner speaking</span> : "Hear the question"}
+                {isSpeakingPrompt ? <span className="t-pending">Examiner speaking</span> : "Hear the question"}
               </Button>
               <p className="text-sm text-soft">Listen first, as you would in the test room.</p>
             </div>

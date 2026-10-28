@@ -371,7 +371,7 @@ function GeneratingState() {
     <PageColumn
       title="Building your plan"
       lead={
-        <span role="status" aria-live="polite" className="t-shimmer">
+        <span role="status" aria-live="polite" className="t-pending">
           Reading your target band, exam date and recent scores
         </span>
       }

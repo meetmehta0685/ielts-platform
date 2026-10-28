@@ -7,7 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-import { OAUTH_NEXT_PATH_KEY } from "@/lib/auth-redirect";
+import { startGoogleSignIn } from "@/lib/auth-redirect";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -85,18 +85,8 @@ export function SignupForm() {
   const handleGoogleLogin = async () => {
     setIsLoading(true);
     try {
-      const callbackUrl = new URL("/auth/callback", window.location.origin);
-      window.sessionStorage.setItem(OAUTH_NEXT_PATH_KEY, "/complete-profile");
-
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: {
-          redirectTo: callbackUrl.toString(),
-        },
-      });
-      if (error) throw error;
+      await startGoogleSignIn("/complete-profile");
     } catch (error: unknown) {
-      window.sessionStorage.removeItem(OAUTH_NEXT_PATH_KEY);
       toast.error(error instanceof Error ? error.message : "Google sign-up didn't start. Try again.");
       setIsLoading(false);
     }
@@ -175,6 +165,13 @@ export function SignupFooter() {
       <Link href="/auth/login" className="font-medium text-ink underline decoration-1 underline-offset-4 hover:decoration-2">
         Sign in
       </Link>
+      <p className="mt-3 text-[13px]">
+        By creating an account you agree to how we handle your data, set out in our{" "}
+        <Link href="/privacy" className="underline decoration-1 underline-offset-4 hover:text-ink">
+          privacy policy
+        </Link>
+        .
+      </p>
     </>
   );
 }

@@ -315,7 +315,7 @@ export default function ChatPage() {
               type="button"
               onClick={() => setSidebarOpen((prev) => !prev)}
               aria-expanded={sidebarOpen}
-              className="inline-flex h-11 items-center gap-2 rounded-full px-3 text-[15px] text-ink transition-colors duration-[var(--duration-quick)] hover:bg-panel lg:hidden"
+              className="inline-flex h-11 items-center gap-2 rounded-[10px] px-3 text-[15px] text-ink transition-colors duration-[var(--duration-quick)] hover:bg-panel lg:hidden"
             >
               <PanelLeft className="size-4" />
               {sidebarOpen ? "Close" : "Conversations"}

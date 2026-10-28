@@ -55,9 +55,9 @@
   --radius-md: 10px;
   --radius-lg: var(--radius);
   --radius-xl: 16px;
-  --radius-2xl: 20px;
-  --radius-3xl: 24px;
-  --radius-4xl: 28px;
+  --radius-2xl: 16px;
+  --radius-3xl: 18px;
+  --radius-4xl: 20px;
 
   --shadow-tile: var(--tile-shadow);
   --shadow-lift: var(--lift-shadow);
@@ -88,15 +88,16 @@
   --bad-tint: #fdecec;
   --bad-tint-hover: #fadcdd;
 
-  /* One hue per module, used only to mark that module's data: its dot, its chart line, its tile. */
-  --listening: #ff6b35;
-  --reading: #8b5cf6;
-  --writing: #10b981;
-  --speaking: #ec4899;
+  /* One hue per module, used only to mark that module's data: its dot, its chart line, its tile.
+     Matched in lightness so no module shouts over another. */
+  --listening: #e2601f;
+  --reading: #6a47d1;
+  --writing: #138a63;
+  --speaking: #cc3a6a;
 
-  /* Tiles are white with a 1px ring and a breath of shadow; they lift on hover. */
-  --tile-shadow: 0 0 0 1px rgb(12 12 18 / 0.06), 0 1px 2px rgb(12 12 18 / 0.04), 0 2px 6px -2px rgb(12 12 18 / 0.04);
-  --lift-shadow: 0 0 0 1px rgb(12 12 18 / 0.07), 0 8px 24px -8px rgb(12 12 18 / 0.14), 0 2px 6px -2px rgb(12 12 18 / 0.06);
+  /* Tiles are white with a hairline ring. Under the pointer the ring darkens; nothing floats. */
+  --tile-shadow: 0 0 0 1px rgb(12 12 18 / 0.08);
+  --lift-shadow: 0 0 0 1px rgb(12 12 18 / 0.16), 0 2px 4px -1px rgb(12 12 18 / 0.06);
 
   --background: var(--sheet);
   --foreground: var(--ink);
@@ -135,14 +136,11 @@
   --ease-in-out: ease-in-out;
   --ease-out: ease-out;
   --ease-linear: linear;
-  --ease-bounce: cubic-bezier(0.34, 1.36, 0.64, 1);
   --distance-micro: 4px;
   --distance-base: 8px;
   --distance-medium: 12px;
   --scale-medium: 0.97;
   --scale-small: 0.98;
-  --blur-small: 2px;
-  --blur-medium: 3px;
 }
 
 @layer base {
@@ -164,6 +162,13 @@
     background: var(--brand);
     color: var(--brand-ink);
   }
+  html {
+    scrollbar-color: var(--line-strong) transparent;
+    caret-color: var(--brand);
+  }
+  a {
+    text-underline-offset: 0.2em;
+  }
   :focus-visible {
     outline: 2px solid var(--brand);
     outline-offset: 2px;
@@ -173,28 +178,20 @@
 @utility font-display {
   font-family: var(--font-display);
   font-weight: 600;
-  letter-spacing: -0.035em;
+  letter-spacing: -0.03em;
   line-height: 1;
 }
 
-/* A white tile on the chrome ground: hairline ring, faint shadow. `tile-hover` lifts it under the pointer. */
+/* A white tile: hairline ring. `tile-hover` darkens the ring under the pointer. */
 @utility tile {
   background: var(--sheet);
   border-radius: var(--radius-2xl);
   box-shadow: var(--tile-shadow);
 }
 @utility tile-hover {
-  transition:
-    box-shadow var(--duration-fast) var(--ease-smooth-out),
-    transform var(--duration-fast) var(--ease-smooth-out);
+  transition: box-shadow var(--duration-quick) var(--ease-smooth-out);
   &:hover {
     box-shadow: var(--lift-shadow);
-    transform: translateY(-2px);
-  }
-  @media (prefers-reduced-motion: reduce) {
-    &:hover {
-      transform: none;
-    }
   }
 }
 
@@ -202,68 +199,41 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Entrance: heading, text, picture rise in sequence once the block is in view (see components/motion/reveal.tsx). */
-.t-stagger .t-stagger-line {
-  opacity: 0;
-  transform: translateY(var(--distance-medium));
-  filter: blur(var(--blur-medium));
-  transition:
-    opacity var(--duration-very-slow) var(--ease-in-out),
-    transform var(--duration-very-slow) var(--ease-smooth-out),
-    filter var(--duration-very-slow) var(--ease-in-out);
-  transition-delay: calc(var(--i, 0) * 70ms);
-}
-.t-stagger.is-shown .t-stagger-line {
-  opacity: 1;
-  transform: none;
-  filter: none;
-}
+/* Content is visible by default. `Reveal` only marks a block once it scrolls into view, for the
+   few pieces of data that draw themselves in (the sitting bar on the landing page). */
 
-/* Text states swap: old value leaves upward, new value enters from below. */
+/* Text states swap: the new value settles in from just below. */
 @keyframes t-swap-in {
   from {
     opacity: 0;
     transform: translateY(var(--distance-micro));
-    filter: blur(var(--blur-small));
   }
 }
 .t-swap {
-  animation: t-swap-in var(--duration-quick) var(--ease-in-out);
+  animation: t-swap-in var(--duration-quick) var(--ease-smooth-out);
 }
 
-/* Streaming text: each new chunk resolves through a soft cross-blur. */
+/* Streaming text: each new chunk fades in. */
 @keyframes t-stream-in {
   from {
     opacity: 0;
-    filter: blur(var(--blur-small));
   }
 }
 .t-stream > span {
-  animation: t-stream-in var(--duration-slow) var(--ease-in-out) both;
+  animation: t-stream-in var(--duration-fast) var(--ease-out) both;
 }
 
-/* Shimmer text for in-progress labels ("Marking your essay"). */
-.t-shimmer {
+/* In-progress label ("Marking your essay"): a slow breath of opacity, never a gradient sweep. */
+.t-pending {
   color: var(--soft);
-  background: linear-gradient(90deg, var(--soft) 0%, var(--soft) 40%, var(--ink) 50%, var(--soft) 60%, var(--soft) 100%)
-    0 0 / 250% 100% no-repeat text;
-  -webkit-text-fill-color: transparent;
-  animation: t-shimmer 1.6s var(--ease-linear) infinite;
-}
-@keyframes t-shimmer {
-  from {
-    background-position: 100% 0;
-  }
-  to {
-    background-position: 0% 0;
-  }
+  animation: t-pulse 1.8s var(--ease-in-out) infinite;
 }
 
 /* Skeleton pulse that cross-fades into the loaded content. */
 .t-skel {
   background: var(--panel-strong);
   border-radius: var(--radius-sm);
-  animation: t-pulse 1.4s var(--ease-linear) infinite;
+  animation: t-pulse 1.4s var(--ease-in-out) infinite;
 }
 @keyframes t-pulse {
   50% {
@@ -273,52 +243,43 @@
 @keyframes t-reveal {
   from {
     opacity: 0;
-    filter: blur(var(--blur-small));
   }
 }
 .t-revealed {
-  animation: t-reveal var(--duration-slow) var(--ease-in-out);
+  animation: t-reveal var(--duration-fast) var(--ease-out);
 }
 
 /* Message or row appearing in a list. */
 @keyframes t-rise {
   from {
     opacity: 0;
-    transform: translateY(var(--distance-base));
+    transform: translateY(var(--distance-micro));
   }
 }
 .t-rise {
   animation: t-rise var(--duration-fast) var(--ease-smooth-out) both;
 }
 
-/* Number pop-in for a figure that just changed. */
+/* A figure that just changed settles into place. */
 @keyframes t-pop {
   from {
     opacity: 0;
-    transform: translateY(8px);
-    filter: blur(var(--blur-small));
+    transform: translateY(var(--distance-micro));
   }
 }
 .t-pop {
   display: inline-block;
-  animation: t-pop var(--duration-very-slow) var(--ease-bounce) both;
+  animation: t-pop var(--duration-fast) var(--ease-smooth-out) both;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .t-stagger .t-stagger-line,
   .t-swap,
   .t-stream > span,
   .t-revealed,
   .t-rise,
-  .t-pop {
-    animation: none !important;
-    transition: none !important;
-    opacity: 1 !important;
-    transform: none !important;
-    filter: none !important;
-  }
-  .t-shimmer,
+  .t-pop,
+  .t-pending,
   .t-skel {
-    animation: none;
+    animation: none !important;
   }
 }
